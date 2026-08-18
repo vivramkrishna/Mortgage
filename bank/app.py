@@ -33,6 +33,10 @@ logger = logging.getLogger("bank")
 PUBLIC_DIR = Path(__file__).resolve().parent / "public"
 BANK_PORT = int(os.getenv("BANK_PORT", "4000"))
 
+# Same local-dev-only switch the backend uses for its debug endpoints — never
+# enable in a real deployment.
+DEBUG_ENDPOINTS = os.getenv("DEBUG_EXPOSE_OTP", "false").lower() == "true"
+
 app = FastAPI(title="Lloyds Bank Core", docs_url="/docs", redoc_url=None)
 
 # The Command Centre is served from this same origin, but allow everything so
@@ -63,6 +67,17 @@ class ChatEvent(BaseModel):
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     return {"status": "ok", "service": "Lloyds Bank Core"}
+
+
+@app.post("/api/_debug/reset", include_in_schema=False)
+async def debug_reset() -> dict:
+    """Local-dev-only: wipe all session records so the Command Centre starts
+    clean (scripts/test_mcp.py otherwise leaves its test sessions in the
+    sidebar forever). Disabled unless DEBUG_EXPOSE_OTP=true."""
+    if not DEBUG_ENDPOINTS:
+        raise HTTPException(status_code=404, detail="Not found")
+    records.reset()
+    return {"status": "reset"}
 
 
 @app.get("/api/customer", tags=["customers"])

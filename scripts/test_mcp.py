@@ -4,7 +4,8 @@ and walk the mortgage + OTP authentication + transactions journey end to end.
 
 Connects as a real MCP client over Streamable HTTP and asserts that:
   * `list_transactions` advertises `_meta["openai/outputTemplate"]`
-  * the referenced resource exists and is served as `text/html+skybridge`
+  * the referenced resource exists and is served with an MCP Apps UI MIME type
+    (`text/html;profile=mcp-app`, or legacy `text/html+skybridge`)
   * calling the tool returns `structuredContent` (what the widget renders from)
   * transactions are gated behind email + OTP authentication
   * the mortgage journey collects fields one at a time, then requires the same

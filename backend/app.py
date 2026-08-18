@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
-from backend import auth, config
+from backend import auth, bank_client, config
 from backend.logging_conf import configure_logging
 from backend.mcp_server import mcp_asgi_app, session_manager
 from backend.models import (
@@ -95,6 +95,7 @@ async def debug_reset() -> dict:
         raise HTTPException(status_code=404, detail="Not found")
     auth.reset()
     store.reset()
+    bank_client.reset_records()
     return {"status": "reset"}
 
 

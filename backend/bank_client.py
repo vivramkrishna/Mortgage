@@ -75,6 +75,18 @@ def underwrite(
     return response.json()
 
 
+def reset_records() -> None:
+    """Ask the bank to wipe its session records (debug-gated on the bank side).
+
+    Best-effort: reached only from the backend's own debug reset, and a bank
+    that is down or predates the endpoint must not break the reset.
+    """
+    try:
+        httpx.post(_url("/api/_debug/reset"), timeout=TIMEOUT)
+    except httpx.HTTPError as exc:
+        logger.debug("Could not reset bank records: %s", exc)
+
+
 def log_chat(session_id: str, sender: str, text: str) -> None:
     """Mirror a message into the bank's live feed.
 
