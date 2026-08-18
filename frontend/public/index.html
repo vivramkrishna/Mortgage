@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lloyds Demo | Home</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body data-page="home">
+  <header class="navbar">
+    <a class="brand" href="/">
+      <span class="mark">L</span>
+      Lloyds Demo Banking
+    </a>
+    <nav>
+      <a href="/" data-path="/">Home</a>
+      <a href="/transactions" data-path="/transactions">Transactions</a>
+      <a href="/mortgage" data-path="/mortgage">Mortgage</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <section class="hero">
+      <h1>Banking, brought to life inside ChatGPT.</h1>
+      <p>
+        This is the companion web app for the Lloyds Banking Demo Plugin. Ask
+        the ChatGPT assistant about your transactions or a mortgage, then
+        continue the journey here with a full banking dashboard.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/transactions">View Transactions</a>
+        <a class="btn btn-secondary" href="/mortgage">Mortgage Dashboard</a>
+      </div>
+    </section>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="section-title" style="margin-top:0">💳 Transaction Viewer</div>
+        <p style="color:var(--text-muted); font-size:14.5px;">
+          Ask ChatGPT: <em>"Show my transactions"</em>. The assistant returns a
+          rich summary card with a link straight into this dashboard, showing
+          your full transaction history, spending analytics, and category
+          breakdown.
+        </p>
+        <ul class="feature-list">
+          <li><span class="check">✓</span> Summary cards for total spend &amp; transaction count</li>
+          <li><span class="check">✓</span> Full transaction table</li>
+          <li><span class="check">✓</span> Spending-by-category analytics</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-top:0">🏡 Mortgage Application</div>
+        <p style="color:var(--text-muted); font-size:14.5px;">
+          Ask ChatGPT: <em>"I want a mortgage"</em>. The assistant asks for your
+          annual salary, then generates an estimated offer — continue here to
+          see your full application status and eligibility summary.
+        </p>
+        <ul class="feature-list">
+          <li><span class="check">✓</span> Application status tracker</li>
+          <li><span class="check">✓</span> Loan &amp; repayment breakdown</li>
+          <li><span class="check">✓</span> Eligibility summary</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer-note">Lloyds Banking Demo &middot; Synthetic data for demonstration purposes only</p>
+  </main>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

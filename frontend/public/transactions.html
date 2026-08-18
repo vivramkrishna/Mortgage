@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lloyds Demo | Transactions</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body data-page="transactions">
+    <header class="navbar">
+      <a class="brand" href="/">
+        <span class="mark">L</span>
+        Lloyds Demo Banking
+      </a>
+      <nav>
+        <a href="/" data-path="/">Home</a>
+        <a href="/transactions" data-path="/transactions">Transactions</a>
+        <a href="/mortgage" data-path="/mortgage">Mortgage</a>
+      </nav>
+    </header>
+
+    <main class="page">
+      <div class="page-header">
+        <h1>Vivek's Transactions</h1>
+        <p>
+          Full spending history and analytics, synced from your ChatGPT
+          conversation.
+        </p>
+      </div>
+
+      <div id="loading" class="loader">
+        <div class="spinner"></div>
+        Loading your transactions&hellip;
+      </div>
+
+      <div id="error" style="display: none" class="error-banner"></div>
+
+      <div id="content" style="display: none">
+        <div class="grid cols-3" id="summary-cards"></div>
+
+        <div class="section-title">📊 Spending by Category</div>
+        <div class="card">
+          <div class="category-bar" id="category-bars"></div>
+        </div>
+
+        <div class="section-title">📋 Transaction History</div>
+        <div class="card" style="padding: 0">
+          <table class="txn-table">
+            <thead>
+              <tr>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th>Date</th>
+                <th style="text-align: right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="txn-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="footer-note">
+        Lloyds Banking Demo &middot; Synthetic data for demonstration purposes
+        only
+      </p>
+    </main>
+
+    <script src="/js/app.js"></script>
+    <script>
+      async function load() {
+        const loadingEl = document.getElementById("loading");
+        const errorEl = document.getElementById("error");
+        const contentEl = document.getElementById("content");
+        try {
+          const data = await window.lloydsFetch("/api/transactions");
+
+          document.getElementById("summary-cards").innerHTML = `
+          <div class="card stat-card">
+            <div class="label">Total Spending</div>
+            <div class="value">${window.formatGBP(data.total_spending)}</div>
+            <div class="meta">Across ${data.transaction_count} transactions</div>
+          </div>
+          <div class="card stat-card">
+            <div class="label">Transactions</div>
+            <div class="value">${data.transaction_count}</div>
+            <div class="meta">Avg ${window.formatGBP(data.average_transaction)} / transaction</div>
+          </div>
+          <div class="card stat-card">
+            <div class="label">Latest Transaction</div>
+            <div class="value">${data.latest_transaction.icon} ${data.latest_transaction.merchant}</div>
+            <div class="meta">${window.formatGBP(data.latest_transaction.amount)} &middot; ${window.formatDate(data.latest_transaction.date)}</div>
+          </div>
+        `;
+
+          const maxCategory = Math.max(
+            ...Object.values(data.spending_by_category),
+          );
+          document.getElementById("category-bars").innerHTML = Object.entries(
+            data.spending_by_category,
+          )
+            .sort((a, b) => b[1] - a[1])
+            .map(
+              ([name, amount]) => `
+              <div class="category-row">
+                <div class="name">${name}</div>
+                <div class="track"><div class="fill" style="width:${(amount / maxCategory) * 100}%"></div></div>
+                <div class="amt">${window.formatGBP(amount)}</div>
+              </div>
+            `,
+            )
+            .join("");
+
+          document.getElementById("txn-rows").innerHTML = data.transactions
+            .map(
+              (t) => `
+              <tr>
+                <td>
+                  <div class="merchant-cell">
+                    <span class="merchant-icon">${t.icon}</span>
+                    ${t.merchant}
+                  </div>
+                </td>
+                <td>${t.category}</td>
+                <td>${window.formatDate(t.date)}</td>
+                <td style="text-align:right" class="amount">${window.formatGBP(t.amount)}</td>
+              </tr>
+            `,
+            )
+            .join("");
+
+          loadingEl.style.display = "none";
+          contentEl.style.display = "block";
+        } catch (err) {
+          loadingEl.style.display = "none";
+          errorEl.style.display = "block";
+          errorEl.textContent = `Could not load transactions: ${err.message}. Make sure the backend is running (see README) and reachable at ${window.LLOYDS_API_BASE}.`;
+        }
+      }
+      load();
+    </script>
+  </body>
+</html>

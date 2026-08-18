@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Lloyds Banking Demo",
+  "name_for_model": "lloyds_banking_demo",
+  "description_for_human": "View your Lloyds transactions and apply for a mortgage, right inside chat.",
+  "description_for_model": "Plugin for a demo Lloyds banking experience. Use listTransactions whenever the user asks to see, list, or review their transactions, spending, or transaction history. Use startMortgageApplication the moment the user says they want a mortgage or home loan; it returns a question asking for their annual salary. Ask the user that question, wait for their reply, then call calculateMortgageOffer with the salary they provide. Always render the `ui_card` field of every response verbatim as Markdown so the user sees a rich banking-style card, and always surface the `lloyds_web_app_url` link from the response as a prominent Markdown link.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "{{PUBLIC_BASE_URL}}/openapi.yaml",
+    "is_user_authenticated": false
+  },
+  "logo_url": "{{PUBLIC_BASE_URL}}/logo.png",
+  "contact_email": "support@example.com",
+  "legal_info_url": "{{PUBLIC_BASE_URL}}/legal"
+}

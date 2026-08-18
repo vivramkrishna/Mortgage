@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lloyds Demo | Mortgage</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body data-page="mortgage">
+  <header class="navbar">
+    <a class="brand" href="/">
+      <span class="mark">L</span>
+      Lloyds Demo Banking
+    </a>
+    <nav>
+      <a href="/" data-path="/">Home</a>
+      <a href="/transactions" data-path="/transactions">Transactions</a>
+      <a href="/mortgage" data-path="/mortgage">Mortgage</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <div class="page-header">
+      <h1>Mortgage Application</h1>
+      <p>Track your application status and review your estimated offer.</p>
+    </div>
+
+    <div id="loading" class="loader">
+      <div class="spinner"></div>
+      Loading your mortgage application&hellip;
+    </div>
+
+    <div id="empty" style="display:none" class="card empty-state">
+      <div class="icon">🏡</div>
+      <h3 style="margin:0 0 6px">No mortgage application yet</h3>
+      <p style="margin:0">
+        Ask the Lloyds assistant in ChatGPT: <em>"I want a mortgage"</em> to start
+        an application. Once you provide your annual salary, your estimated
+        offer will appear here automatically.
+      </p>
+    </div>
+
+    <div id="error" style="display:none" class="error-banner"></div>
+
+    <div id="content" style="display:none">
+      <div class="card" style="margin-bottom:24px">
+        <span class="status-badge" id="status-badge">● Initiated</span>
+        <div style="margin-top:14px" class="kv-grid">
+          <div class="kv">
+            <div class="k">Application ID</div>
+            <div class="v" id="app-id">&mdash;</div>
+          </div>
+          <div class="kv">
+            <div class="k">Annual Salary</div>
+            <div class="v" id="salary">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid cols-3">
+        <div class="card stat-card">
+          <div class="label">Loan Amount</div>
+          <div class="value" id="loan-amount">&mdash;</div>
+        </div>
+        <div class="card stat-card">
+          <div class="label">Interest Rate</div>
+          <div class="value" id="interest-rate">&mdash;</div>
+        </div>
+        <div class="card stat-card">
+          <div class="label">Monthly Payment</div>
+          <div class="value" id="monthly-payment">&mdash;</div>
+        </div>
+      </div>
+
+      <div class="section-title">📐 Loan Breakdown</div>
+      <div class="card">
+        <div class="kv-grid">
+          <div class="kv">
+            <div class="k">Term</div>
+            <div class="v" id="term">&mdash;</div>
+          </div>
+          <div class="kv">
+            <div class="k">Total Repayable</div>
+            <div class="v" id="total-repayable">&mdash;</div>
+          </div>
+          <div class="kv">
+            <div class="k">Total Interest</div>
+            <div class="v" id="total-interest">&mdash;</div>
+          </div>
+          <div class="kv">
+            <div class="k">Loan-to-Income Multiple</div>
+            <div class="v" id="lti">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">✅ Eligibility Summary</div>
+      <div class="card">
+        <span class="pill" id="eligibility-pill">Eligible</span>
+        <p style="color:var(--text-muted); font-size:14px; margin:12px 0 0" id="eligibility-notes"></p>
+      </div>
+
+      <div class="section-title">📝 Application Progress</div>
+      <div class="card">
+        <div class="progress-steps" id="progress-steps"></div>
+      </div>
+    </div>
+
+    <p class="footer-note">Lloyds Banking Demo &middot; Synthetic data for demonstration purposes only</p>
+  </main>
+
+  <script src="/js/app.js"></script>
+  <script>
+    async function load() {
+      const loadingEl = document.getElementById("loading");
+      const errorEl = document.getElementById("error");
+      const emptyEl = document.getElementById("empty");
+      const contentEl = document.getElementById("content");
+
+      const applicationId = new URLSearchParams(window.location.search).get("application_id");
+      const path = applicationId ? `/api/mortgage/${applicationId}` : "/api/mortgage/latest";
+
+      try {
+        const data = await window.lloydsFetch(path);
+
+        document.getElementById("status-badge").textContent = `● ${data.application_status}`;
+        document.getElementById("app-id").textContent = data.application_id;
+        document.getElementById("salary").textContent = window.formatGBP(data.annual_salary);
+        document.getElementById("loan-amount").textContent = window.formatGBP(data.loan_amount);
+        document.getElementById("interest-rate").textContent = `${data.interest_rate}%`;
+        document.getElementById("monthly-payment").textContent = window.formatGBP(data.estimated_monthly_payment);
+        document.getElementById("term").textContent = `${data.term_years} years`;
+        document.getElementById("total-repayable").textContent = window.formatGBP(data.total_repayable);
+        document.getElementById("total-interest").textContent = window.formatGBP(data.total_interest);
+        document.getElementById("lti").textContent = `${data.eligibility.loan_to_income_multiple}x`;
+        document.getElementById("eligibility-pill").textContent = data.eligibility.eligible
+          ? "Eligible"
+          : "Not Eligible";
+        document.getElementById("eligibility-notes").textContent = data.eligibility.notes;
+
+        document.getElementById("progress-steps").innerHTML = data.next_steps
+          .map(
+            (step, i) => `
+              <div class="progress-step ${i === 0 ? "" : "pending"}">
+                <div class="dot">${i + 1}</div>
+                <div class="content">
+                  <div class="title">${step}</div>
+                  <div class="desc">${i === 0 ? "In progress" : "Pending"}</div>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+
+        loadingEl.style.display = "none";
+        contentEl.style.display = "block";
+      } catch (err) {
+        loadingEl.style.display = "none";
+        if (err.status === 404) {
+          emptyEl.style.display = "block";
+        } else {
+          errorEl.style.display = "block";
+          errorEl.textContent = `Could not load mortgage application: ${err.message}. Make sure the backend is running (see README) and reachable at ${window.LLOYDS_API_BASE}.`;
+        }
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

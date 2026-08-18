@@ -1,0 +1,131 @@
+openapi: 3.1.0
+info:
+  title: Lloyds Banking Demo Plugin
+  description: >
+    Demo banking API exposing transaction viewing and a mortgage application
+    flow. Responses include a pre-rendered `ui_card` Markdown field intended
+    to be shown verbatim to the user for a rich, banking-style presentation,
+    and a `lloyds_web_app_url` link to continue the journey in the Lloyds
+    web application.
+  version: "1.0.0"
+servers:
+  - url: https://hardcore-prayer-exerciser.ngrok-free.dev
+paths:
+  /api/transactions:
+    get:
+      operationId: listTransactions
+      summary: List the user's recent transactions
+      description: >
+        Returns recent transactions plus a spending summary (total spend,
+        transaction count, latest transaction, spend by category). Call this
+        whenever the user asks to see, list, or review their transactions,
+        spending, or transaction history.
+      responses:
+        "200":
+          description: Transaction summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionSummaryResponse"
+  /api/mortgage/start:
+    post:
+      operationId: startMortgageApplication
+      summary: Start the interactive mortgage application flow
+      description: >
+        Call this the moment the user says they want a mortgage or home
+        loan. Returns a question asking for the user's annual salary. Ask
+        the user that question, wait for their reply, then call
+        calculateMortgageOffer with the salary value they provide.
+      responses:
+        "200":
+          description: Prompt asking for annual salary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MortgagePromptResponse"
+  /api/mortgage/estimate:
+    post:
+      operationId: calculateMortgageOffer
+      summary: Calculate a mortgage offer from annual salary
+      description: >
+        Calculates a mortgage offer (loan amount, interest rate, term,
+        estimated monthly payment) from the user's annual salary in GBP.
+        Call this after the user replies with their salary following
+        startMortgageApplication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MortgageSalaryRequest"
+      responses:
+        "200":
+          description: Mortgage offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MortgageOfferResponse"
+components:
+  schemas:
+    Transaction:
+      type: object
+      properties:
+        id: { type: string }
+        merchant: { type: string }
+        category: { type: string }
+        amount: { type: number }
+        date: { type: string }
+        icon: { type: string }
+        status: { type: string }
+    TransactionSummaryResponse:
+      type: object
+      properties:
+        total_spending: { type: number }
+        transaction_count: { type: integer }
+        latest_transaction:
+          $ref: "#/components/schemas/Transaction"
+        spending_by_category:
+          type: object
+          additionalProperties: { type: number }
+        average_transaction: { type: number }
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        lloyds_web_app_url: { type: string }
+        ui_card:
+          type: string
+          description: Pre-rendered Markdown card. Render verbatim to the user.
+    MortgageSalaryRequest:
+      type: object
+      required: [annual_salary]
+      properties:
+        annual_salary:
+          type: number
+          description: Applicant's gross annual salary in GBP
+    MortgagePromptResponse:
+      type: object
+      properties:
+        message: { type: string }
+        awaiting: { type: string }
+    MortgageOfferResponse:
+      type: object
+      properties:
+        annual_salary: { type: number }
+        loan_amount: { type: number }
+        interest_rate: { type: number }
+        term_years: { type: integer }
+        estimated_monthly_payment: { type: number }
+        total_repayable: { type: number }
+        total_interest: { type: number }
+        application_status: { type: string }
+        application_id: { type: string }
+        eligibility: { type: object }
+        next_steps:
+          type: array
+          items: { type: string }
+        generated_at: { type: string }
+        lloyds_web_app_url: { type: string }
+        ui_card:
+          type: string
+          description: Pre-rendered Markdown card. Render verbatim to the user.

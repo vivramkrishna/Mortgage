@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+mcp==1.13.1
+pyngrok==7.2.0
+python-multipart==0.0.9
+httpx==0.27.2
+# Arrives with uvicorn[standard] too, but pinned here because the app imports
+# it directly to read .env.
+python-dotenv==1.2.2

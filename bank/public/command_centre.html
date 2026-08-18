@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lloyds | Bank Command Centre</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1c2230;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-dim: #8b949e;
+      --green: #2ea043;
+      --green-dim: #1f6f33;
+      --blue: #1f6feb;
+      --blue-soft: #2b6cb0;
+      --amber: #d29922;
+      --red: #f85149;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+      font-size: 14px;
+    }
+
+    /* --- Sidebar ------------------------------------------------------- */
+    .sidebar {
+      width: 280px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 18px 16px;
+      overflow-y: auto;
+    }
+    .sidebar h2 {
+      font-size: 15px;
+      margin: 0 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--green);
+    }
+    .session-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .session-card:hover { border-color: var(--text-dim); }
+    .session-card.active { border-color: var(--green); background: #12261a; }
+    .session-card .sid { font-weight: 600; font-size: 13px; word-break: break-all; }
+    .session-card .who { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
+
+    /* --- Layout -------------------------------------------------------- */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .topbar {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+    }
+    .topbar .title { font-weight: 600; }
+    .grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 14px;
+      padding: 14px;
+      overflow: hidden;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel > h3 {
+      margin: 0;
+      padding: 11px 14px;
+      font-size: 13px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-body { padding: 14px; overflow-y: auto; flex: 1; }
+
+    /* --- Chat feed ------------------------------------------------------ */
+    .msg {
+      background: var(--blue);
+      border-radius: 8px;
+      padding: 10px 13px;
+      margin-bottom: 9px;
+      border-left: 4px solid #79b8ff;
+      color: #fff;
+    }
+    .msg .sender { font-weight: 700; font-size: 12px; margin-bottom: 3px; }
+    .msg .text { white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+    .msg.bank { background: var(--surface-2); border-left-color: var(--green); color: var(--text); }
+
+    /* --- Underwriting checks -------------------------------------------- */
+    .check {
+      display: grid;
+      grid-template-columns: 20px 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .check:last-child { border-bottom: none; }
+    .check .name { font-size: 13px; }
+    .check .reason { grid-column: 2 / -1; color: var(--text-dim); font-size: 11.5px; margin-top: -4px; }
+    .tick { color: var(--green); font-weight: 700; }
+    .cross { color: var(--red); font-weight: 700; }
+    .verdict { font-weight: 700; font-size: 11.5px; letter-spacing: .04em; }
+    .verdict.pass { color: var(--green); }
+    .verdict.fail { color: var(--red); }
+    .pts { color: var(--amber); font-size: 11.5px; min-width: 46px; text-align: right; }
+
+    .decision {
+      margin-top: 14px;
+      padding: 10px 13px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .decision b.ok { color: var(--green); }
+    .decision b.no { color: var(--red); }
+
+    .offer {
+      margin-top: 12px;
+      border: 1px solid var(--green-dim);
+      background: #10281a;
+      border-radius: 8px;
+      padding: 13px;
+    }
+    .offer h4 { margin: 0 0 10px; font-size: 12px; color: var(--green); letter-spacing: .05em; }
+    .offer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 14px; }
+    .offer-grid .k { color: var(--text-dim); font-size: 11.5px; }
+    .offer-grid .v { font-weight: 700; font-size: 14px; }
+
+    /* --- Goal plan ------------------------------------------------------ */
+    .goal-desc { color: var(--text-dim); font-size: 12.5px; line-height: 1.55; margin-bottom: 12px; }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 7px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 12.5px;
+      letter-spacing: .03em;
+    }
+    .step.done { background: #10281a; border-color: var(--green-dim); color: var(--green); }
+    .profile { margin-top: 14px; }
+    .profile-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 12.5px;
+    }
+    .profile-row .k { color: var(--text-dim); }
+
+    .status-pill {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .status-pill.offer { color: var(--green); border-color: var(--green-dim); background: #10281a; }
+    .status-pill.declined { color: var(--red); border-color: #6e2a25; background: #2b1210; }
+
+    .empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 26px 12px; line-height: 1.6; }
+    .tag { font-size: 11px; color: var(--text-dim); }
+
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: 1fr; grid-template-rows: none; overflow-y: auto; }
+      .panel { min-height: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>🏦 Command Centre</h2>
+    <div id="sessionList"></div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="title" id="activeTitle">No session selected</div>
+      <div id="activeStatus"></div>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h3>💬 Live Chat Feed</h3>
+        <div class="panel-body" id="chatFeed">
+          <div class="empty">Select a session to view its conversation.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>🔍 Underwriting Checks</h3>
+        <div class="panel-body" id="checks">
+          <div class="empty">No underwriting run yet.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>🤝 Negotiation Log</h3>
+        <div class="panel-body" id="negotiation">
+          <div class="empty">No negotiation rounds.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>🎯 Goal Plan &amp; Profile</h3>
+        <div class="panel-body" id="goal">
+          <div class="empty">No session selected.</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const CHECK_LABELS = {
+      validate: "Field Validation",
+      credit: "Credit Score",
+      dti: "Debt-to-Income (DTI)",
+      ltv: "Loan-to-Value (LTV)",
+      age: "Age Eligibility",
+      loan: "Loan Amount Limits",
+      term: "Mortgage Term",
+    };
+    const CHECK_ORDER = ["dti", "loan", "ltv", "term", "validate", "credit", "age"];
+
+    let activeSid = null;
+    let sessions = {};
+
+    const gbp = (v) =>
+      new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(v || 0);
+    const esc = (s) =>
+      String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+
+    function statusClass(status) {
+      if (status === "Offer Made") return "offer";
+      if (status === "Declined") return "declined";
+      return "";
+    }
+
+    function renderSessions() {
+      const entries = Object.entries(sessions).sort(
+        (a, b) => String(b[1].updated_at).localeCompare(String(a[1].updated_at))
+      );
+      const el = document.getElementById("sessionList");
+
+      if (!entries.length) {
+        el.innerHTML = '<div class="empty">No applications yet.<br>Start one in ChatGPT.</div>';
+        return;
+      }
+
+      el.innerHTML = entries
+        .map(([sid, d]) => {
+          const who = d.customer ? d.customer.full_name : "Awaiting identification";
+          return `<div class="session-card ${sid === activeSid ? "active" : ""}" data-sid="${esc(sid)}">
+            <div class="sid">${esc(sid)}</div>
+            <div class="who">${esc(who)}</div>
+            <div style="margin-top:7px"><span class="status-pill ${statusClass(d.status)}">${esc(d.status)}</span></div>
+          </div>`;
+        })
+        .join("");
+
+      el.querySelectorAll(".session-card").forEach((card) =>
+        card.addEventListener("click", () => {
+          activeSid = card.dataset.sid;
+          render();
+        })
+      );
+    }
+
+    function renderChat(d) {
+      const el = document.getElementById("chatFeed");
+      if (!d || !d.chat.length) {
+        el.innerHTML = '<div class="empty">No messages yet.</div>';
+        return;
+      }
+      el.innerHTML = d.chat
+        .map((m) => {
+          const isBank = /bank|lloyds|system/i.test(m.sender || "");
+          return `<div class="msg ${isBank ? "bank" : ""}">
+            <div class="sender">${esc(m.sender)}</div>
+            <div class="text">${esc(m.text)}</div>
+          </div>`;
+        })
+        .join("");
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function renderChecks(d) {
+      const el = document.getElementById("checks");
+      if (!d || !d.checks || !Object.keys(d.checks).length) {
+        el.innerHTML = '<div class="empty">No underwriting run yet.<br>Runs once every detail is collected <em>and</em> the customer verifies their email.</div>';
+        return;
+      }
+
+      const rows = CHECK_ORDER.filter((k) => d.checks[k])
+        .map((key) => {
+          const c = d.checks[key];
+          const pts = c.risk_points === undefined ? "" : `+${c.risk_points} pts`;
+          return `<div class="check">
+              <span class="${c.passed ? "tick" : "cross"}">${c.passed ? "✓" : "✗"}</span>
+              <span class="name">${esc(CHECK_LABELS[key] || key)}</span>
+              <span class="verdict ${c.passed ? "pass" : "fail"}">${c.passed ? "PASS" : "FAIL"}</span>
+              <span class="pts">${esc(pts)}</span>
+              <span class="reason">${esc(c.reason || "")}</span>
+            </div>`;
+        })
+        .join("");
+
+      let html = rows;
+
+      if (d.decision) {
+        html += `<div class="decision">Decision:
+          <b class="${d.decision.approved ? "ok" : "no"}">${d.decision.approved ? "APPROVED" : "DECLINED"}</b>
+          &mdash; ${esc(d.decision.reason)}</div>`;
+      }
+
+      if (d.offer) {
+        html += `<div class="offer">
+          <h4>CURRENT OFFER</h4>
+          <div class="offer-grid">
+            <div><div class="k">Loan</div><div class="v">${gbp(d.offer.amount)}</div></div>
+            <div><div class="k">Rate</div><div class="v">${Number(d.offer.rate).toFixed(2)}%</div></div>
+            <div><div class="k">Term</div><div class="v">${esc(d.offer.term)} years</div></div>
+            <div><div class="k">Monthly</div><div class="v">${gbp(d.offer.monthly)}</div></div>
+          </div>
+          ${d.offer.capped ? `<div class="tag" style="margin-top:10px">Requested ${gbp(d.offer.requested_amount)} — capped to the affordability limit.</div>` : ""}
+        </div>`;
+      }
+
+      el.innerHTML = html;
+    }
+
+    function renderGoal(d) {
+      const el = document.getElementById("goal");
+      if (!d) {
+        el.innerHTML = '<div class="empty">No session selected.</div>';
+        return;
+      }
+
+      let html = `<div class="goal-desc"><b style="color:var(--text)">GOAL</b><br>${esc(d.goal.description)}
+        <div style="margin-top:6px">Status: <b style="color:var(--green)">${esc(d.goal.status)}</b></div></div>`;
+
+      html += d.goal.steps
+        .map((s) => `<div class="step ${s.state === "done" ? "done" : ""}">
+            ${s.state === "done" ? "✓" : "○"} ${esc(s.name)}
+          </div>`)
+        .join("");
+
+      if (d.customer) {
+        const c = d.customer;
+        const rows = [
+          ["Customer", c.full_name],
+          ["Customer ID", c.customer_id],
+          ["Email", c.email],
+          ["Annual income", gbp(c.applicant_annual_income)],
+          ["Credit score", c.credit_score],
+          ["Employment", c.employment_type],
+          ["Existing debts", gbp(c.existing_debts)],
+          ["Property being bought", gbp(c.property_value)],
+          ["Deposit", gbp(c.deposit_amount)],
+        ];
+        html += `<div class="profile"><b style="font-size:12px">CUSTOMER PROFILE</b>${rows
+          .map(([k, v]) => `<div class="profile-row"><span class="k">${esc(k)}</span><span>${esc(v)}</span></div>`)
+          .join("")}</div>`;
+      }
+
+      if (d.rationale) {
+        html += `<div class="profile"><b style="font-size:12px">BANK REASONING</b>
+          <div class="goal-desc" style="margin-top:8px">${esc(d.rationale)}</div></div>`;
+      }
+
+      el.innerHTML = html;
+    }
+
+    function renderNegotiation(d) {
+      const el = document.getElementById("negotiation");
+      if (!d || !d.negotiation_log || !d.negotiation_log.length) {
+        el.innerHTML = '<div class="empty">No negotiation rounds.<br>The offer stands as first presented.</div>';
+        return;
+      }
+      el.innerHTML = d.negotiation_log
+        .map((r) => `<div class="decision" style="margin-top:0;margin-bottom:10px">
+            <b>Round ${esc(r.round)}</b><div class="tag">${esc(r.bank_reasoning || "")}</div>
+          </div>`)
+        .join("");
+    }
+
+    function render() {
+      renderSessions();
+      const d = activeSid ? sessions[activeSid] : null;
+
+      document.getElementById("activeTitle").textContent = d
+        ? `${activeSid} · mortgage`
+        : "No session selected";
+      document.getElementById("activeStatus").innerHTML = d
+        ? `<span class="status-pill ${statusClass(d.status)}">${esc(d.status)}</span>`
+        : "";
+
+      renderChat(d);
+      renderChecks(d);
+      renderNegotiation(d);
+      renderGoal(d);
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/sessions");
+        sessions = await res.json();
+        // Auto-select the most recently touched session on first load.
+        if (!activeSid || !sessions[activeSid]) {
+          const entries = Object.entries(sessions).sort(
+            (a, b) => String(b[1].updated_at).localeCompare(String(a[1].updated_at))
+          );
+          activeSid = entries.length ? entries[0][0] : null;
+        }
+        render();
+      } catch (err) {
+        document.getElementById("activeTitle").textContent = "Bank core unreachable";
+      }
+    }
+
+    poll();
+    setInterval(poll, 2000);
+  </script>
+</body>
+</html>

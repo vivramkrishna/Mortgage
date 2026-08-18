@@ -1,0 +1,290 @@
+<div id="root"></div>
+<script type="module">
+// Lloyds transactions component.
+//
+// Data can arrive by either of two host conventions, so we support both:
+//   * MCP Apps standard — postMessage JSON-RPC `ui/notifications/tool-result`
+//   * ChatGPT compat    — `window.openai.toolOutput` (+ `openai:set_globals`)
+// Whichever lands first wins; later updates re-render.
+
+const STYLES = `
+#root {
+  --green: #006a4d;
+  --green-deep: #024731;
+  --accent: #5cbf8a;
+  --bg: #ffffff;
+  --surface: #f6f8f7;
+  --text: #16211c;
+  --muted: #5b6b63;
+  --border: #e3e8e5;
+  --shadow: 0 1px 2px rgba(2,71,49,.06), 0 4px 16px rgba(2,71,49,.07);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.45;
+}
+@media (prefers-color-scheme: dark) {
+  #root {
+    --bg: #1b1f1d; --surface: #232926; --text: #eef2f0; --muted: #a3b1aa;
+    --border: #333c38; --accent: #6ed49b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+  }
+}
+#root.theme-dark {
+  --bg: #1b1f1d; --surface: #232926; --text: #eef2f0; --muted: #a3b1aa;
+  --border: #333c38; --accent: #6ed49b;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+}
+#root.theme-light {
+  --bg: #ffffff; --surface: #f6f8f7; --text: #16211c; --muted: #5b6b63;
+  --border: #e3e8e5; --accent: #5cbf8a;
+}
+#root * { box-sizing: border-box; }
+#root .card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
+}
+#root .head {
+  display: flex; align-items: center; gap: 10px; padding: 16px 18px;
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-deep) 100%);
+  color: #fff;
+}
+#root .head .mark {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent); color: var(--green-deep);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 15px; flex-shrink: 0;
+}
+#root .head .title { font-weight: 700; font-size: 15px; }
+#root .head .sub { font-size: 12px; opacity: .8; }
+#root .stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--border); border-bottom: 1px solid var(--border);
+}
+#root .stat { background: var(--bg); padding: 14px 16px; }
+#root .stat .k {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 700; margin-bottom: 3px;
+}
+#root .stat .v { font-size: 19px; font-weight: 800; color: var(--text); line-height: 1.2; }
+#root .stat .m { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 460px) {
+  #root .stats { grid-template-columns: 1fr; }
+  #root .stat { padding: 11px 16px; }
+  #root .stat .v { font-size: 17px; }
+}
+#root .section {
+  padding: 14px 18px 4px; font-size: 11px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+}
+#root .rows { padding: 0 8px 6px; }
+#root .row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; }
+#root .row + .row { border-top: 1px solid var(--border); }
+#root .row .icon {
+  width: 36px; height: 36px; border-radius: 10px; background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; flex-shrink: 0;
+}
+#root .row .info { flex: 1; min-width: 0; }
+#root .row .merchant {
+  font-weight: 650; font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#root .row .meta { font-size: 11.5px; color: var(--muted); }
+#root .row .amt { font-weight: 750; font-size: 14px; white-space: nowrap; }
+#root .bars { padding: 4px 18px 10px; display: grid; gap: 9px; }
+#root .bar { display: flex; align-items: center; gap: 10px; }
+#root .bar .name {
+  width: 108px; flex-shrink: 0; font-size: 11.5px; color: var(--muted);
+  font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#root .bar .track { flex: 1; height: 7px; border-radius: 99px; background: var(--surface); overflow: hidden; }
+#root .bar .fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--green)); }
+#root .bar .amt { width: 62px; text-align: right; font-size: 11.5px; font-weight: 700; }
+@media (max-width: 460px) { #root .bar .name { width: 82px; } }
+#root .foot { padding: 12px 18px 16px; }
+#root .btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 12px 18px; background: var(--green); color: #fff;
+  border: none; border-radius: 999px; font-size: 14px; font-weight: 700;
+  font-family: inherit; cursor: pointer; text-decoration: none;
+  transition: filter .15s ease, transform .1s ease;
+}
+#root .btn:hover { filter: brightness(1.08); }
+#root .btn:active { transform: translateY(1px); }
+#root .note { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 9px; }
+#root .empty { padding: 26px; text-align: center; color: var(--muted); font-size: 13px; }
+`;
+
+const root = document.getElementById("root");
+
+const styleEl = document.createElement("style");
+styleEl.textContent = STYLES;
+document.head.appendChild(styleEl);
+
+const openai = typeof window !== "undefined" ? window.openai : undefined;
+
+function gbp(n) {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(n);
+  } catch (e) {
+    return "£" + Number(n).toFixed(2);
+  }
+}
+
+function shortDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  } catch (e) {
+    return String(iso || "").slice(0, 10);
+  }
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+}
+
+function applyTheme() {
+  const theme = openai && openai.theme;
+  if (theme === "dark" || theme === "light") {
+    root.classList.remove("theme-dark", "theme-light");
+    root.classList.add("theme-" + theme);
+  }
+}
+
+// Tool results are untrusted input — validate shape before rendering.
+function normalise(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw.structuredContent && typeof raw.structuredContent === "object"
+    ? raw.structuredContent
+    : raw;
+  if (!d || !Array.isArray(d.transactions)) return null;
+  return d;
+}
+
+function render(data) {
+  applyTheme();
+
+  if (!data || !data.transactions.length) {
+    root.innerHTML = '<div class="card"><div class="empty">No transactions to show.</div></div>';
+    return;
+  }
+
+  const txns = data.transactions;
+  const latest = data.latest_transaction || txns[0];
+  const cats = data.spending_by_category && typeof data.spending_by_category === "object"
+    ? data.spending_by_category : {};
+  const catEntries = Object.keys(cats).map((k) => [k, cats[k]]).sort((a, b) => b[1] - a[1]);
+  const maxCat = catEntries.length ? catEntries[0][1] : 1;
+
+  const rowsHtml = txns.map((t) => `
+    <div class="row">
+      <div class="icon">${esc(t.icon || "💳")}</div>
+      <div class="info">
+        <div class="merchant">${esc(t.merchant)}</div>
+        <div class="meta">${esc(t.category)} · ${esc(shortDate(t.date))}</div>
+      </div>
+      <div class="amt">${esc(gbp(t.amount))}</div>
+    </div>`).join("");
+
+  const barsHtml = catEntries.map((e) => {
+    const pct = maxCat > 0 ? (e[1] / maxCat) * 100 : 0;
+    return `
+      <div class="bar">
+        <div class="name">${esc(e[0])}</div>
+        <div class="track"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="amt">${esc(gbp(e[1]))}</div>
+      </div>`;
+  }).join("");
+
+  root.innerHTML = `
+    <div class="card">
+      <div class="head">
+        <div class="mark">L</div>
+        <div>
+          <div class="title">Vivek's Transactions</div>
+          <div class="sub">Lloyds · Current Account</div>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Total Spending</div>
+          <div class="v">${esc(gbp(data.total_spending))}</div>
+          <div class="m">${esc(data.transaction_count)} transactions</div>
+        </div>
+        <div class="stat">
+          <div class="k">Average</div>
+          <div class="v">${esc(gbp(data.average_transaction))}</div>
+          <div class="m">per transaction</div>
+        </div>
+        <div class="stat">
+          <div class="k">Latest</div>
+          <div class="v">${esc(gbp(latest.amount))}</div>
+          <div class="m">${esc(latest.icon || "")} ${esc(latest.merchant)}</div>
+        </div>
+      </div>
+      <div class="section">Recent activity</div>
+      <div class="rows">${rowsHtml}</div>
+      ${barsHtml ? `<div class="section">Spending by category</div><div class="bars">${barsHtml}</div>` : ""}
+      <div class="foot">
+        <button class="btn" type="button" id="lloyds-cta">Open in Lloyds Web App →</button>
+        <div class="note">Demo data · Lloyds Banking Demo</div>
+      </div>
+    </div>`;
+
+  const cta = document.getElementById("lloyds-cta");
+  const url = data.lloyds_web_app_url;
+  if (cta && typeof url === "string" && /^https?:\/\//.test(url)) {
+    cta.addEventListener("click", () => {
+      try {
+        if (openai && typeof openai.openExternal === "function") {
+          openai.openExternal({ href: url });
+          return;
+        }
+      } catch (e) { /* fall through */ }
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+  }
+}
+
+let lastData = null;
+function update(raw) {
+  const d = normalise(raw);
+  if (d) {
+    lastData = d;
+    render(d);
+  }
+}
+
+// --- Path 1: MCP Apps postMessage bridge ------------------------------------
+window.addEventListener("message", (event) => {
+  const msg = event.data;
+  if (!msg || typeof msg !== "object") return;
+  const method = msg.method;
+  if (method === "ui/notifications/tool-result" || method === "ui/notifications/tool-input") {
+    const p = msg.params || {};
+    update(p.structuredContent ? p : (p.result || p.toolResult || p.output || p));
+  }
+});
+
+try {
+  // Announce readiness so the host knows it can deliver the tool result.
+  window.parent && window.parent.postMessage(
+    { jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} }, "*"
+  );
+} catch (e) { /* not embedded */ }
+
+// --- Path 2: window.openai compat surface -----------------------------------
+if (openai && openai.toolOutput) update(openai.toolOutput);
+window.addEventListener("openai:set_globals", () => {
+  if (window.openai && window.openai.toolOutput) update(window.openai.toolOutput);
+  else applyTheme();
+});
+
+if (!lastData) {
+  root.innerHTML = '<div class="card"><div class="empty">Loading your transactions…</div></div>';
+}
+</script>
