@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Verify the MCP server speaks the ChatGPT Apps SDK widget protocol correctly,
-and walk the mortgage + OTP authentication + transactions journey end to end.
+and walk the mortgage + reference ID verification + transactions journey end to end.
 
 Connects as a real MCP client over Streamable HTTP and asserts that:
   * `list_transactions` advertises `_meta["openai/outputTemplate"]`
   * the referenced resource exists and is served with an MCP Apps UI MIME type
     (`text/html;profile=mcp-app`, or legacy `text/html+skybridge`)
   * calling the tool returns `structuredContent` (what the widget renders from)
-  * transactions are gated behind email + OTP authentication
+  * transactions are gated behind email + reference ID verification
   * the mortgage journey collects fields one at a time, then requires the same
-    email + OTP flow before submitting
-  * once authenticated, that state is reused — transactions no longer prompts
+    email + reference ID flow before submitting
+  * once verified, that state is reused — transactions no longer prompts
 
-OTP codes are read back via the local-dev-only `/api/_debug/otp` endpoint
-(`DEBUG_EXPOSE_OTP=true` in `.env`), since verifying real inbox delivery isn't
+Reference IDs are read back via the local-dev-only `/api/_debug/reference-id` endpoint
+(`DEBUG_EXPOSE_REFERENCE_ID=true` in `.env`), since verifying real inbox delivery isn't
 automatable here.
 
 Usage:
@@ -67,8 +67,8 @@ def text_of(result) -> str:
 
 
 async def reset_backend_state(base_url: str) -> bool:
-    """Clear auth/application state so the suite is re-runnable against a
-    long-lived backend. Needs DEBUG_EXPOSE_OTP=true."""
+    """Clear verification/application state so the suite is re-runnable against a
+    long-lived backend. Needs DEBUG_EXPOSE_REFERENCE_ID=true."""
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(f"{base_url}/api/_debug/reset", timeout=5)
@@ -90,15 +90,15 @@ async def fetch_bank_session(session_id: str) -> dict | None:
         return resp.json()
 
 
-async def fetch_debug_otp(base_url: str) -> str | None:
+async def fetch_debug_reference_id(base_url: str) -> str | None:
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(f"{base_url}/api/_debug/otp", timeout=5)
+            resp = await client.get(f"{base_url}/api/_debug/reference-id", timeout=5)
         except httpx.HTTPError:
             return None
         if resp.status_code != 200:
             return None
-        return resp.json().get("otp")
+        return resp.json().get("reference_id")
 
 
 async def main(base_url: str) -> int:
@@ -107,10 +107,10 @@ async def main(base_url: str) -> int:
     print(f"\nConnecting to {url}\n")
 
     # A previous run leaves the session verified for an hour, which would make
-    # the "unauthenticated" assertions below fail on a re-run.
+    # the "unverified" assertions below fail on a re-run.
     if not await reset_backend_state(base_url):
-        print("  note: could not reset backend state (needs DEBUG_EXPOSE_OTP=true);")
-        print("        the unauthenticated checks may fail on a repeat run.\n")
+        print("  note: could not reset backend state (needs DEBUG_EXPOSE_REFERENCE_ID=true);")
+        print("        the unverified checks may fail on a repeat run.\n")
 
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -124,8 +124,8 @@ async def main(base_url: str) -> int:
                 "list_transactions",
                 "start_mortgage_application",
                 "provide_mortgage_details",
-                "submit_authentication_email",
-                "verify_authentication_otp",
+                "submit_verification_email",
+                "verify_reference_id",
             }
             c.check("all five tools present", set(tools) == expected_tools, ", ".join(sorted(tools)))
 
@@ -142,7 +142,7 @@ async def main(base_url: str) -> int:
                          and meta.get("openai/toolInvocation/invoked")))
 
             for name in ("start_mortgage_application", "provide_mortgage_details",
-                         "submit_authentication_email", "verify_authentication_otp"):
+                         "submit_verification_email", "verify_reference_id"):
                 t = tools.get(name)
                 has_tpl = bool((t.meta or {}).get("openai/outputTemplate")) if t else False
                 c.check(f"{name} has NO widget (as intended)", not has_tpl)
@@ -174,13 +174,13 @@ async def main(base_url: str) -> int:
             c.check("widget is self-contained (no external URLs)",
                     "http://" not in html and "https://" not in html)
 
-            # --- transactions require authentication ---
-            print("\ntools/call list_transactions (unauthenticated)")
+            # --- transactions require verification ---
+            print("\ntools/call list_transactions (unverified)")
             gated = await session.call_tool("list_transactions", {})
             gtext = text_of(gated)
-            c.check("unauthenticated transactions asks for email",
-                    "email id for authentication" in gtext.lower())
-            c.check("unauthenticated transactions has NO widget meta",
+            c.check("unverified transactions asks for email",
+                    "email id to continue" in gtext.lower())
+            c.check("unverified transactions has NO widget meta",
                     not (gated.meta or {}).get("openai/outputTemplate"))
 
             # --- mortgage flow: one field at a time ---
@@ -201,7 +201,7 @@ async def main(base_url: str) -> int:
                 )
             final_text = text_of(last_result)
             c.check("after last field, mortgage flow asks for email",
-                    "email id for authentication" in final_text.lower(), final_text[:120])
+                    "email id to continue" in final_text.lower(), final_text[:120])
 
             # --- the answer must land whatever key the model used ---
             # Regression guard: an unrecognised/aliased parameter name used to be
@@ -225,7 +225,7 @@ async def main(base_url: str) -> int:
                 res = await session.call_tool(
                     "provide_mortgage_details", {"application_id": alias_id, **payload}
                 )
-                moved_on = "email id for authentication" in text_of(res).lower()
+                moved_on = "email id to continue" in text_of(res).lower()
                 c.check(f"{label} advances past the term question", moved_on,
                         "" if moved_on else text_of(res)[:80])
 
@@ -293,7 +293,7 @@ async def main(base_url: str) -> int:
                 "provide_mortgage_details", {"application_id": stale_id, "value": 25}
             )
             c.check("stale: flow reaches identity verification",
-                    "email id for authentication" in text_of(r3).lower(), text_of(r3)[:80])
+                    "email id to continue" in text_of(r3).lower(), text_of(r3)[:80])
 
             # The same resolver must land the property value in the right slot.
             print("\ntools/call provide_mortgage_details (property value aliases)")
@@ -315,15 +315,15 @@ async def main(base_url: str) -> int:
                         "" if moved_on else text_of(res)[:80])
 
             # --- email must resolve to a real customer ---
-            print("\ntools/call submit_authentication_email")
+            print("\ntools/call submit_verification_email")
             bad_email = await session.call_tool(
-                "submit_authentication_email", {"email": "not-an-email", "application_id": app_id}
+                "submit_verification_email", {"email": "not-an-email", "application_id": app_id}
             )
-            c.check("invalid email format is rejected without sending an OTP",
+            c.check("invalid email format is rejected without sending a reference ID",
                     "valid email" in text_of(bad_email).lower())
 
             unknown = await session.call_tool(
-                "submit_authentication_email",
+                "submit_verification_email",
                 {"email": UNKNOWN_CUSTOMER_EMAIL, "application_id": app_id},
             )
             unknown_text = text_of(unknown)
@@ -331,39 +331,39 @@ async def main(base_url: str) -> int:
                     "couldn't find" in unknown_text.lower(), unknown_text[:120])
 
             good_email = await session.call_tool(
-                "submit_authentication_email",
+                "submit_verification_email",
                 {"email": KNOWN_CUSTOMER_EMAIL, "application_id": app_id},
             )
             email_text = text_of(good_email)
             if good_email.isError:
-                c.skip("OTP email send", f"SMTP not configured/reachable: {email_text}")
+                c.skip("reference ID email send", f"SMTP not configured/reachable: {email_text}")
             else:
-                c.check("valid email asks for the OTP",
-                        "otp for authentication" in email_text.lower())
+                c.check("valid email asks for the reference ID",
+                        "reference id to continue" in email_text.lower())
 
-            otp = await fetch_debug_otp(base_url)
-            if otp is None:
-                c.skip("OTP verification checks", "DEBUG_EXPOSE_OTP is not enabled — set it in .env to run these")
+            reference_id = await fetch_debug_reference_id(base_url)
+            if reference_id is None:
+                c.skip("reference ID verification checks", "DEBUG_EXPOSE_REFERENCE_ID is not enabled — set it in .env to run these")
             else:
-                # --- wrong OTP cancels this application outright ---
-                wrong = "000000" if otp != "000000" else "111111"
-                wrong_result = await session.call_tool("verify_authentication_otp", {"otp": wrong})
+                # --- wrong reference ID cancels this application outright ---
+                wrong = "000000" if reference_id != "000000" else "111111"
+                wrong_result = await session.call_tool("verify_reference_id", {"reference_id": wrong})
                 wrong_text = text_of(wrong_result)
-                c.check("wrong OTP shows 'Invalid OTP'",
-                        "invalid otp" in wrong_text.lower())
-                c.check("wrong OTP says plainly that the code is wrong",
+                c.check("wrong reference ID shows 'Invalid reference ID'",
+                        "invalid reference id" in wrong_text.lower())
+                c.check("wrong reference ID says plainly that the code is wrong",
                         "the code you entered is wrong" in wrong_text.lower(),
                         wrong_text.splitlines()[0][:90])
-                c.check("wrong OTP cancels the application",
+                c.check("wrong reference ID cancels the application",
                         "cancelled" in wrong_text.lower(), wrong_text[:120])
 
                 # The issued code is dead even though it was the correct one.
-                reused = await session.call_tool("verify_authentication_otp", {"otp": otp})
+                reused = await session.call_tool("verify_reference_id", {"reference_id": reference_id})
                 c.check("the original code is void after cancellation",
-                        "invalid otp" in text_of(reused).lower())
+                        "invalid reference id" in text_of(reused).lower())
 
                 # --- a fresh application, verified correctly, submits ---
-                print("\ntools/call mortgage flow (fresh application, correct OTP)")
+                print("\ntools/call mortgage flow (fresh application, correct reference ID)")
                 start2 = await session.call_tool("start_mortgage_application", {})
                 app_id2 = (start2.structuredContent or {}).get("application_id")
                 c.check("cancelled application is not reused",
@@ -373,13 +373,13 @@ async def main(base_url: str) -> int:
                         "provide_mortgage_details", {"application_id": app_id2, field: value}
                     )
                 await session.call_tool(
-                    "submit_authentication_email",
+                    "submit_verification_email",
                     {"email": KNOWN_CUSTOMER_EMAIL, "application_id": app_id2},
                 )
-                otp2 = await fetch_debug_otp(base_url)
-                right_result = await session.call_tool("verify_authentication_otp", {"otp": otp2})
+                reference_id2 = await fetch_debug_reference_id(base_url)
+                right_result = await session.call_tool("verify_reference_id", {"reference_id": reference_id2})
                 right_text = text_of(right_result)
-                c.check("correct OTP submits the mortgage application",
+                c.check("correct reference ID submits the mortgage application",
                         "mortgage application submitted" in right_text.lower(),
                         right_text.splitlines()[0][:90])
                 c.check("success card shows the Application ID",
@@ -451,8 +451,8 @@ async def main(base_url: str) -> int:
                     c.check("goal plan advanced through PRESENT_OFFER",
                             "PRESENT_OFFER" in done_steps, ", ".join(done_steps))
 
-                # --- auth is now reused: transactions no longer prompts ---
-                print("\ntools/call list_transactions (now authenticated — reused session)")
+                # --- verification is now reused: transactions no longer prompts ---
+                print("\ntools/call list_transactions (now verified — reused session)")
                 result = await session.call_tool("list_transactions", {})
                 rmeta = result.meta or {}
                 c.check("RESULT carries ui.resourceUri (renders the widget)",

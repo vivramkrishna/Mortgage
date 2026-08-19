@@ -16,9 +16,9 @@ component instead of plain text:
 
 Reference: https://developers.openai.com/plugins/build/chatgpt-ui
 
-`list_transactions` renders a widget once authenticated — the mortgage tools
+`list_transactions` renders a widget once verified — the mortgage tools
 and the pre-auth prompts return Markdown only. Both flows share a single
-process-global OTP session (backend/auth.py): verifying once (whichever flow
+process-global reference ID session (backend/auth.py): verifying once (whichever flow
 triggered it) is reused by the other for the rest of the chat session.
 """
 import logging
@@ -39,8 +39,8 @@ from backend.ui_cards import (
     render_email_prompt,
     render_mortgage_field_question,
     render_mortgage_success_card,
-    render_otp_cancelled,
-    render_otp_prompt,
+    render_reference_id_cancelled,
+    render_reference_id_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,12 +186,12 @@ async def list_tools() -> list[types.Tool]:
                 "summary. Call this whenever the user asks to see, list, view "
                 "or review their transactions, spending, or transaction "
                 "history. Requires identity verification — if the result asks "
-                "the user to authenticate, follow up with "
-                "`submit_authentication_email` then `verify_authentication_otp` "
+                "the user to verify their identity, follow up with "
+                "`submit_verification_email` then `verify_reference_id` "
                 "(same shared verification flow the mortgage journey uses; if "
                 "the user already verified earlier in this chat you won't be "
                 "asked again), then call `list_transactions` again. Once "
-                "authenticated, the result renders as an interactive banking "
+                "verified, the result renders as an interactive banking "
                 "card — do not repeat the transaction data as a table in your "
                 "reply; just add a one-line summary."
             ),
@@ -222,12 +222,12 @@ async def list_tools() -> list[types.Tool]:
                 "Pass only the field(s) the user just gave you — do not guess "
                 "values for fields not yet asked. The response tells you the "
                 "next question to ask, or — once all fields are collected — an "
-                "email/OTP verification prompt (follow up with "
-                "`submit_authentication_email`). Every mortgage application "
-                "must pass its own OTP check before it can be submitted, so "
+                "email/reference ID verification prompt (follow up with "
+                "`submit_verification_email`). Every mortgage application "
+                "must pass its own reference ID check before it can be submitted, so "
                 "expect this step even if the user verified earlier in the "
                 "chat. Render the returned text verbatim — never paraphrase it "
-                "or claim a step (like 'OTP sent') happened without actually "
+                "or claim a step (like 'reference ID sent') happened without actually "
                 "calling the corresponding tool first."
             ),
             inputSchema={
@@ -252,20 +252,20 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="submit_authentication_email",
-            title="Submit email for OTP authentication",
+            name="submit_verification_email",
+            title="Submit email for identity verification",
             description=(
                 "Submit the user's email address to start identity "
                 "verification. Call this after the user is asked to "
-                "authenticate (either at the end of the mortgage details flow, "
+                "verify their identity (either at the end of the mortgage details flow, "
                 "or when `list_transactions` asks for it) and replies with "
                 "their email. Pass `application_id` only when this is part of "
                 "the mortgage flow (omit it for the transactions flow). Sends "
-                "a one-time code to that email and asks the user to enter it — "
-                "then call `verify_authentication_otp`. If the email format is "
-                "invalid, no code is sent; ask the user for a valid email again "
+                "a reference ID to that email and asks the user to enter it — "
+                "then call `verify_reference_id`. If the email format is "
+                "invalid, no reference ID is sent; ask the user for a valid email again "
                 "and re-call this tool. IMPORTANT: you MUST actually call this "
-                "tool to trigger the send — never tell the user a code was sent "
+                "tool to trigger the send — never tell the user a reference ID was sent "
                 "without having called it, and always relay the exact text this "
                 "tool returns rather than inventing your own confirmation message."
             ),
@@ -283,15 +283,15 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="verify_authentication_otp",
-            title="Verify OTP",
+            name="verify_reference_id",
+            title="Verify reference ID",
             description=(
-                "Verify the one-time code the user received by email, "
-                "following `submit_authentication_email`. If the code matches, "
+                "Verify the reference ID the user received by email, "
+                "following `submit_verification_email`. If the code matches, "
                 "the result completes whichever flow triggered verification: a "
                 "mortgage application success card, or the transactions card. "
                 "If the code is wrong or expired, the request is CANCELLED — "
-                "the result says 'Invalid OTP' and the pending mortgage "
+                "the result says 'Invalid reference ID' and the pending mortgage "
                 "application is discarded. Do not retry the code in that case; "
                 "relay the cancellation to the user and, if they want to "
                 "continue, start over with `start_mortgage_application`. You "
@@ -304,14 +304,14 @@ async def list_tools() -> list[types.Tool]:
                 "submitted' instead of the card drops the approved amount, "
                 "interest rate, term, monthly payment and Application ID, all "
                 "of which the customer needs. Likewise, when a code is "
-                "rejected, show the card so the customer sees the OTP was wrong."
+                "rejected, show the card so the customer sees the reference ID was wrong."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "otp": {"type": "string", "description": "The 6-digit code the user entered."},
+                    "reference_id": {"type": "string", "description": "The 6-digit code the user entered."},
                 },
-                "required": ["otp"],
+                "required": ["reference_id"],
                 "additionalProperties": False,
             },
         ),
@@ -336,10 +336,10 @@ async def _handle_call_tool(req: types.CallToolRequest) -> types.ServerResult:
             result = _handle_start_mortgage_application()
         elif name == "provide_mortgage_details":
             result = _handle_provide_mortgage_details(arguments)
-        elif name == "submit_authentication_email":
-            result = _handle_submit_authentication_email(arguments)
-        elif name == "verify_authentication_otp":
-            result = _handle_verify_authentication_otp(arguments)
+        elif name == "submit_verification_email":
+            result = _handle_submit_verification_email(arguments)
+        elif name == "verify_reference_id":
+            result = _handle_verify_reference_id(arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
     except Exception as exc:  # surfaced to the model rather than dropping the connection
@@ -392,7 +392,7 @@ def _transactions_widget_result() -> types.CallToolResult:
 
 
 def _handle_list_transactions() -> types.CallToolResult:
-    if not auth.is_authenticated():
+    if not auth.is_verified():
         return _text_result(render_email_prompt())
     return _transactions_widget_result()
 
@@ -726,7 +726,7 @@ def _finalize_mortgage_application(application_id: str) -> types.CallToolResult:
     )
 
 
-def _handle_submit_authentication_email(arguments: dict[str, Any]) -> types.CallToolResult:
+def _handle_submit_verification_email(arguments: dict[str, Any]) -> types.CallToolResult:
     email = arguments.get("email", "")
     application_id = arguments.get("application_id")
     purpose = "mortgage" if application_id else "transactions"
@@ -771,13 +771,13 @@ def _handle_submit_authentication_email(arguments: dict[str, Any]) -> types.Call
             isError=True,
         )
 
-    return _text_result(render_otp_prompt())
+    return _text_result(render_reference_id_prompt())
 
 
-def _handle_verify_authentication_otp(arguments: dict[str, Any]) -> types.CallToolResult:
-    otp = arguments.get("otp", "")
+def _handle_verify_reference_id(arguments: dict[str, Any]) -> types.CallToolResult:
+    reference_id = arguments.get("reference_id", "")
 
-    if not auth.verify(otp):
+    if not auth.verify(reference_id):
         # A wrong (or expired) code aborts the whole request rather than
         # looping: the pending session is torn down so the issued code can't
         # be retried, and any half-built application is thrown away.
@@ -785,10 +785,10 @@ def _handle_verify_authentication_otp(arguments: dict[str, Any]) -> types.CallTo
         if purpose == "mortgage" and application_id:
             store.discard_draft(application_id)
             auth.discard_application_verification(application_id)
-            logger.info("OTP rejected — cancelled mortgage application %s", application_id)
-            return _text_result(render_otp_cancelled(application_id))
-        logger.info("OTP rejected — cancelled %s request", purpose or "pending")
-        return _text_result(render_otp_cancelled())
+            logger.info("Reference ID rejected — cancelled mortgage application %s", application_id)
+            return _text_result(render_reference_id_cancelled(application_id))
+        logger.info("Reference ID rejected — cancelled %s request", purpose or "pending")
+        return _text_result(render_reference_id_cancelled())
 
     purpose, application_id = auth.pop_pending()
     if purpose == "mortgage" and application_id:

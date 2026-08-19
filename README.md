@@ -22,7 +22,7 @@ experience.
 ```
 User: "Show my transactions"
   -> ChatGPT calls list_transactions (MCP) or GET /api/transactions (Actions)
-  -> Not yet verified this session? -> email + OTP prompt (see below), then retried
+  -> Not yet verified this session? -> email + reference ID prompt (see below), then retried
   -> Interactive banking widget rendered inline in chat (MCP path)
   -> "Open in Lloyds Web App" button
   -> Click -> http://localhost:3000/transactions (full dashboard)
@@ -30,22 +30,22 @@ User: "Show my transactions"
 User: "@lloyds loan I want mortgage loan"
   -> ChatGPT calls start_mortgage_application -> asks one field at a time:
      loan amount, property value, then repayment term
-  -> Once both are collected: "Please enter your email ID for authentication"
-  -> ChatGPT calls submit_authentication_email(email=...)
+  -> Once both are collected: "Please enter your email ID to continue"
+  -> ChatGPT calls submit_verification_email(email=...)
      -> the BANK is asked for that customer first. Unknown address -> rejected,
-        no code sent. Known address -> OTP sent.
-  -> "Please enter the OTP for authentication"
-  -> ChatGPT calls verify_authentication_otp(otp=...)
-     -> wrong/expired code -> "Invalid OTP": the application is CANCELLED and
+        no code sent. Known address -> reference ID sent.
+  -> "Please enter the reference ID to continue"
+  -> ChatGPT calls verify_reference_id(reference_id=...)
+     -> wrong/expired code -> "Invalid reference ID": the application is CANCELLED and
         the issued code is voided. Starting again issues a fresh code.
      -> correct code -> the bank underwrites the application against that
         customer's real profile and returns a priced offer -> success card
-  -> Each mortgage application requires its own OTP before it can be submitted.
+  -> Each mortgage application requires its own reference ID before it can be submitted.
      The transactions flow reuses a successful verification for the rest of the
      session, so asking for transactions afterwards skips the prompt.
 ```
 
-The email is not just an OTP destination — it **identifies the customer**. The
+The email is not just a verification destination — it **identifies the customer**. The
 bank holds their income, credit score, date of birth, employment, deposit and
 existing debts, so the chat only has to ask the three things the customer
 actually chooses: how much, against what property, and over how long.
@@ -103,7 +103,7 @@ backend/
   models.py               Pydantic request/response schemas
   ui_cards.py             Renders the rich Markdown "cards" shown in chat
   store.py                In-memory bridge: chat-generated mortgage offers -> web app
-  auth.py                 Email + OTP verification session
+  auth.py                 Email + reference ID verification session
   email_client.py         SMTP delivery for verification codes
   bank_client.py          HTTP client for the bank core (:4000)
   config.py               Ports / URLs, overridable via env vars
@@ -191,7 +191,7 @@ result — all three were hit while building this:
   Markdown table *underneath* the widget, duplicating the UI.
 
 **Only `list_transactions` renders a widget**, and only once the user has
-verified their email/OTP this session — before that (and for the mortgage
+verified their email/reference ID this session — before that (and for the mortgage
 flow throughout) tools intentionally return Markdown, per the demo's design.
 
 ---
@@ -207,10 +207,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Configure SMTP (for OTP verification codes)
+### Configure SMTP (for reference ID verification codes)
 
 The mortgage submission and transactions flows are gated behind an email +
-one-time-passcode (OTP) check, sent via real SMTP (not mocked). Copy
+reference ID check, sent via real SMTP (not mocked). Copy
 `.env.example` to `.env` and fill in:
 
 ```
@@ -236,8 +236,8 @@ environment variables still take precedence over the file, so
 `BANK_PORT=4100 python scripts/start.py` overrides whatever `.env` says.
 
 For local testing without checking a real inbox, also set
-`DEBUG_EXPOSE_OTP=true` — this exposes the generated code at
-`GET /api/_debug/otp` and a state reset at `POST /api/_debug/reset`, both used
+`DEBUG_EXPOSE_REFERENCE_ID=true` — this exposes the generated code at
+`GET /api/_debug/reference-id` and a state reset at `POST /api/_debug/reset`, both used
 by `scripts/test_mcp.py` (the reset is what makes the suite re-runnable, since
 a successful verification otherwise lasts an hour). **Never enable this in a
 real deployment.**
@@ -382,10 +382,10 @@ curl -X POST http://localhost:8000/api/mortgage/estimate \
 Expected offer for a £50,000 salary: £250,000 loan, 4.2% rate, 25-year term,
 ~£1,347/month.
 
-The full multi-field + email/OTP mortgage journey described at the top of
+The full multi-field + email/reference ID mortgage journey described at the top of
 this README only exists over MCP (`start_mortgage_application`,
-`provide_mortgage_details`, `submit_authentication_email`,
-`verify_authentication_otp`) — see the next section to exercise it without
+`provide_mortgage_details`, `submit_verification_email`,
+`verify_reference_id`) — see the next section to exercise it without
 ChatGPT.
 
 ### MCP + widget protocol (recommended check)
@@ -497,7 +497,7 @@ Or just run with `--no-ngrok` if you only need local testing.
 - `backend/store.py` is an in-memory bridge so the Lloyds web app can show the
   mortgage offer that was just generated in chat; it resets when the backend
   restarts and isn't multi-user safe — fine for a single-user local demo.
-- Email + OTP verification (`backend/auth.py`) is a single, process-global,
+- Email + reference ID verification (`backend/auth.py`) is a single, process-global,
   in-memory session — again fine for one user in one demo process, but not a
   real multi-tenant auth system. A wrong code cancels the pending request
   outright (no retries) and codes expire after 5 minutes.
@@ -506,6 +506,6 @@ Or just run with `--no-ngrok` if you only need local testing.
   being asked. Models paraphrase parameter names and clients cache old tool
   schemas; without this the flow silently dropped answers and re-asked the
   same question forever.
-- REST endpoints other than `/api/_debug/otp` are not authenticated; the
-  debug OTP endpoint itself is off by default (`DEBUG_EXPOSE_OTP=false`) and
+- REST endpoints other than `/api/_debug/reference-id` are not gated; the
+  debug reference ID endpoint itself is off by default (`DEBUG_EXPOSE_REFERENCE_ID=false`) and
   must never be enabled outside local testing.

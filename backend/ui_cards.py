@@ -62,7 +62,7 @@ Great — let's get your personalised mortgage estimate started.
 """
 
 
-# --- Mortgage journey: field-by-field collection + OTP auth -----------------
+# --- Mortgage journey: field-by-field collection + reference ID verification ----
 
 MORTGAGE_FIELD_QUESTIONS = {
     "loan_amount": "How much would you like to borrow?",
@@ -84,31 +84,31 @@ def render_email_prompt(error: str | None = None) -> str:
     prefix = f"⚠️ {error}\n\n" if error else ""
     return f"""### 🔒 Identity Verification
 
-{prefix}Please enter your email ID for authentication
+{prefix}Please enter your email ID to continue
 """
 
 
-def render_otp_prompt() -> str:
+def render_reference_id_prompt() -> str:
     return """### 🔒 Identity Verification
 
-We've sent a 6-digit verification code to your email.
+We've sent a reference ID to your email.
 
-Please enter the OTP for authentication
+Please enter the reference ID to continue
 """
 
 
-def render_otp_cancelled(application_id: str | None = None) -> str:
+def render_reference_id_cancelled(application_id: str | None = None) -> str:
     reference = (
         f"Application `{application_id}` has been cancelled and not submitted.\n\n"
         if application_id
         else ""
     )
     # The verdict leads, in one blunt sentence — assistants tend to compress
-    # these cards to their first line, and "the OTP is wrong" is the one thing
+    # these cards to their first line, and "the reference ID is wrong" is the one thing
     # the customer must not lose.
-    return f"""### ❌ Invalid OTP — the code you entered is wrong
+    return f"""### ❌ Invalid reference ID — the code you entered is wrong
 
-The OTP you entered does not match the code we emailed you, so this request has
+The reference ID you entered does not match the code we emailed you, so this request has
 been cancelled for your security.
 
 {reference}The code that was issued is no longer valid. To continue, please start again and

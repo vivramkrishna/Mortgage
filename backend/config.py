@@ -42,7 +42,7 @@ WIDGET_MIME_TYPES = {
 }
 WIDGET_MIME_TYPE = WIDGET_MIME_TYPES.get(WIDGET_MIME_MODE, WIDGET_MIME_TYPES["mcp-app"])
 
-# --- OTP email delivery (used by the mortgage + transactions auth flow) -----
+# --- reference ID email delivery (used by the mortgage + transactions verification flow) -----
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
@@ -50,7 +50,7 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USERNAME)
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
 
-# Local-dev-only convenience: exposes the currently pending OTP via
-# GET /api/_debug/otp so scripts/test_mcp.py can verify the flow without a
+# Local-dev-only convenience: exposes the currently pending reference ID via
+# GET /api/_debug/reference-id so scripts/test_mcp.py can verify the flow without a
 # real inbox. NEVER enable this in a real deployment.
-DEBUG_EXPOSE_OTP = os.getenv("DEBUG_EXPOSE_OTP", "false").lower() == "true"
+DEBUG_EXPOSE_REFERENCE_ID = os.getenv("DEBUG_EXPOSE_REFERENCE_ID", "false").lower() == "true"

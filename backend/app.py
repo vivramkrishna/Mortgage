@@ -74,24 +74,24 @@ async def health() -> dict:
     return {"status": "ok", "plugin": config.PLUGIN_NAME}
 
 
-@app.get("/api/_debug/otp", include_in_schema=False)
-async def debug_otp() -> dict:
-    """Local-dev-only: returns the currently pending OTP so scripts/test_mcp.py
-    can verify the auth flow without a real inbox. Disabled unless
-    DEBUG_EXPOSE_OTP=true — never enable this in a real deployment."""
-    if not config.DEBUG_EXPOSE_OTP:
+@app.get("/api/_debug/reference-id", include_in_schema=False)
+async def debug_reference_id() -> dict:
+    """Local-dev-only: returns the currently pending reference ID so scripts/test_mcp.py
+    can verify the verification flow without a real inbox. Disabled unless
+    DEBUG_EXPOSE_REFERENCE_ID=true — never enable this in a real deployment."""
+    if not config.DEBUG_EXPOSE_REFERENCE_ID:
         raise HTTPException(status_code=404, detail="Not found")
     state = auth.peek_state()
     if state is None:
-        raise HTTPException(status_code=404, detail="No pending OTP")
+        raise HTTPException(status_code=404, detail="No pending reference ID")
     return state
 
 
 @app.post("/api/_debug/reset", include_in_schema=False)
 async def debug_reset() -> dict:
     """Local-dev-only: clear verification and application state so the test
-    suite starts from a known point. Disabled unless DEBUG_EXPOSE_OTP=true."""
-    if not config.DEBUG_EXPOSE_OTP:
+    suite starts from a known point. Disabled unless DEBUG_EXPOSE_REFERENCE_ID=true."""
+    if not config.DEBUG_EXPOSE_REFERENCE_ID:
         raise HTTPException(status_code=404, detail="Not found")
     auth.reset()
     store.reset()

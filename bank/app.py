@@ -35,7 +35,7 @@ BANK_PORT = int(os.getenv("BANK_PORT", "4000"))
 
 # Same local-dev-only switch the backend uses for its debug endpoints — never
 # enable in a real deployment.
-DEBUG_ENDPOINTS = os.getenv("DEBUG_EXPOSE_OTP", "false").lower() == "true"
+DEBUG_ENDPOINTS = os.getenv("DEBUG_EXPOSE_REFERENCE_ID", "false").lower() == "true"
 
 app = FastAPI(title="Lloyds Bank Core", docs_url="/docs", redoc_url=None)
 
@@ -73,7 +73,7 @@ async def health() -> dict:
 async def debug_reset() -> dict:
     """Local-dev-only: wipe all session records so the Command Centre starts
     clean (scripts/test_mcp.py otherwise leaves its test sessions in the
-    sidebar forever). Disabled unless DEBUG_EXPOSE_OTP=true."""
+    sidebar forever). Disabled unless DEBUG_EXPOSE_REFERENCE_ID=true."""
     if not DEBUG_ENDPOINTS:
         raise HTTPException(status_code=404, detail="Not found")
     records.reset()
@@ -83,7 +83,7 @@ async def debug_reset() -> dict:
 @app.get("/api/customer", tags=["customers"])
 async def customer_lookup(email: str) -> dict:
     """Resolve a customer by email — this is what makes the email in chat
-    identify a real account rather than just being an OTP destination."""
+    identify a real account rather than just being a verification destination."""
     customer = get_customer(email)
     if customer is None:
         raise HTTPException(status_code=404, detail="No customer found for that email address")

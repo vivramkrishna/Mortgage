@@ -1,7 +1,7 @@
-"""Process-global OTP authentication session for the demo backend.
+"""Process-global identity verification session for the demo backend.
 
 Mirrors backend/store.py's "one active thing at a time" convention: this is a
-single-user, in-memory demo, so authentication state lives in a single
+single-user, in-memory demo, so verification state lives in a single
 module-level session rather than per-user session infrastructure. It is
 shared by the mortgage and transactions flows so that verifying once is
 reused for the rest of the chat session.
@@ -19,17 +19,17 @@ Purpose = Literal["mortgage", "transactions"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-OTP_TTL = timedelta(minutes=5)
+REFERENCE_ID_TTL = timedelta(minutes=5)
 SESSION_TTL = timedelta(minutes=60)
 
 _session: dict | None = None
 
-# Mortgage applications whose OWN OTP has been confirmed. Deliberately
+# Mortgage applications whose OWN reference ID has been confirmed. Deliberately
 # per-application rather than a single global flag — a verification done for
 # one draft (or a different chat/tab) must never auto-approve an unrelated,
 # freshly-started draft. Only the transactions flow (which has no per-item
 # identity to key off) uses the simpler global "verified within this window"
-# reuse via is_authenticated().
+# reuse via is_verified().
 _verified_application_ids: set[str] = set()
 
 
@@ -37,7 +37,7 @@ def is_valid_email(email: str) -> bool:
     return bool(_EMAIL_RE.match((email or "").strip()))
 
 
-def is_authenticated() -> bool:
+def is_verified() -> bool:
     if not _session or not _session.get("verified"):
         return False
     verified_at = _session.get("verified_at")
@@ -65,28 +65,28 @@ def start_verification(email: str, purpose: Purpose, application_id: str | None 
     if not is_valid_email(email):
         raise ValueError("That doesn't look like a valid email address.")
 
-    otp = f"{secrets.randbelow(1_000_000):06d}"
+    reference_id = f"{secrets.randbelow(1_000_000):06d}"
     _session = {
         "email": email.strip(),
-        "otp": otp,
-        "otp_expires_at": datetime.now() + OTP_TTL,
+        "reference_id": reference_id,
+        "reference_id_expires_at": datetime.now() + REFERENCE_ID_TTL,
         "verified": False,
         "verified_at": None,
         "pending_purpose": purpose,
         "pending_application_id": application_id,
     }
 
-    email_client.send_otp_email(email.strip(), otp)
+    email_client.send_reference_id_email(email.strip(), reference_id)
 
 
-def verify(otp: str) -> bool:
+def verify(reference_id: str) -> bool:
     if not _session:
         return False
 
-    if datetime.now() > _session["otp_expires_at"]:
+    if datetime.now() > _session["reference_id_expires_at"]:
         return False
 
-    if (otp or "").strip() != _session["otp"]:
+    if (reference_id or "").strip() != _session["reference_id"]:
         return False
 
     _session["verified"] = True
@@ -132,29 +132,29 @@ def reset() -> None:
     """Clear all verification state.
 
     Local-dev-only, so `scripts/test_mcp.py` can assert against a known
-    unauthenticated starting point on every run — see
-    backend.config.DEBUG_EXPOSE_OTP.
+    unverified starting point on every run — see
+    backend.config.DEBUG_EXPOSE_REFERENCE_ID.
     """
     global _session
     _session = None
     _verified_application_ids.clear()
 
 
-def peek_otp() -> str | None:
-    """Local-dev-only accessor for the currently pending OTP — see
-    backend.config.DEBUG_EXPOSE_OTP."""
-    return _session["otp"] if _session else None
+def peek_reference_id() -> str | None:
+    """Local-dev-only accessor for the currently pending reference ID — see
+    backend.config.DEBUG_EXPOSE_REFERENCE_ID."""
+    return _session["reference_id"] if _session else None
 
 
 def peek_state() -> dict | None:
     """Local-dev-only accessor for the full pending session (which email is
-    about to receive/receive the OTP, and for what purpose) — see
-    backend.config.DEBUG_EXPOSE_OTP."""
+    about to receive/receive the reference ID, and for what purpose) — see
+    backend.config.DEBUG_EXPOSE_REFERENCE_ID."""
     if not _session:
         return None
     return {
         "email": _session.get("email"),
-        "otp": _session.get("otp"),
+        "reference_id": _session.get("reference_id"),
         "purpose": _session.get("pending_purpose"),
         "application_id": _session.get("pending_application_id"),
         "verified": _session.get("verified"),

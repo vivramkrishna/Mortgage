@@ -126,7 +126,7 @@ def record_underwriting(
 def reset() -> None:
     """Clear every session record — local-dev-only, so the Command Centre can
     be wiped clean before a demo without restarting the bank. Reached via
-    POST /api/_debug/reset (gated by DEBUG_EXPOSE_OTP)."""
+    POST /api/_debug/reset (gated by DEBUG_EXPOSE_REFERENCE_ID)."""
     _records.clear()
 
 
