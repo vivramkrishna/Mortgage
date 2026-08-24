@@ -6,114 +6,158 @@
 //   * MCP Apps standard — postMessage JSON-RPC `ui/notifications/tool-result`
 //   * ChatGPT compat    — `window.openai.toolOutput` (+ `openai:set_globals`)
 // Whichever lands first wins; later updates re-render.
+//
+// Only "list" style queries (backend/transactions_data.py) ever reach this
+// widget — sums, counts, averages, breakdowns etc. are answered as plain
+// text with no widget, so this component only ever needs to render a page
+// of transactions plus a spending summary.
 
 const STYLES = `
 #root {
-  --green: #006a4d;
-  --green-deep: #024731;
-  --accent: #5cbf8a;
+  --ink: #0f1512;
+  --muted: #6b7770;
+  --faint: #97a099;
   --bg: #ffffff;
-  --surface: #f6f8f7;
-  --text: #16211c;
-  --muted: #5b6b63;
-  --border: #e3e8e5;
-  --shadow: 0 1px 2px rgba(2,71,49,.06), 0 4px 16px rgba(2,71,49,.07);
+  --surface: #f7f8f7;
+  --border: #e7eae7;
+  --line: #f0f1f0;
+  --brand: #006a4d;
+  --debit: #1c2420;
+  --credit: #0a7a4f;
+  --shadow: 0 1px 2px rgba(15,21,18,.04), 0 8px 24px rgba(15,21,18,.05);
   font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: var(--text);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
   line-height: 1.45;
 }
 @media (prefers-color-scheme: dark) {
   #root {
-    --bg: #1b1f1d; --surface: #232926; --text: #eef2f0; --muted: #a3b1aa;
-    --border: #333c38; --accent: #6ed49b;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    --ink: #eef1ef; --muted: #9aa39c; --faint: #77827a;
+    --bg: #141815; --surface: #1b201c; --border: #262b27; --line: #20241f;
+    --credit: #4fd699;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
   }
 }
 #root.theme-dark {
-  --bg: #1b1f1d; --surface: #232926; --text: #eef2f0; --muted: #a3b1aa;
-  --border: #333c38; --accent: #6ed49b;
-  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+  --ink: #eef1ef; --muted: #9aa39c; --faint: #77827a;
+  --bg: #141815; --surface: #1b201c; --border: #262b27; --line: #20241f;
+  --credit: #4fd699;
 }
 #root.theme-light {
-  --bg: #ffffff; --surface: #f6f8f7; --text: #16211c; --muted: #5b6b63;
-  --border: #e3e8e5; --accent: #5cbf8a;
+  --ink: #0f1512; --muted: #6b7770; --faint: #97a099;
+  --bg: #ffffff; --surface: #f7f8f7; --border: #e7eae7; --line: #f0f1f0;
+  --credit: #0a7a4f;
 }
 #root * { box-sizing: border-box; }
 #root .card {
   background: var(--bg); border: 1px solid var(--border);
-  border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
+  border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
 }
 #root .head {
-  display: flex; align-items: center; gap: 10px; padding: 16px 18px;
-  background: linear-gradient(135deg, var(--green) 0%, var(--green-deep) 100%);
-  color: #fff;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 15px 18px; border-bottom: 1px solid var(--border);
 }
+#root .head .id { display: flex; align-items: center; gap: 10px; min-width: 0; }
 #root .head .mark {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: var(--accent); color: var(--green-deep);
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--brand); color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 15px; flex-shrink: 0;
+  font-weight: 800; font-size: 12px; flex-shrink: 0;
 }
-#root .head .title { font-weight: 700; font-size: 15px; }
-#root .head .sub { font-size: 12px; opacity: .8; }
+#root .head .title { font-weight: 650; font-size: 14px; }
+#root .head .sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+#root .head .scope {
+  font-size: 11px; color: var(--brand); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%;
+}
 #root .stats {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
-  background: var(--border); border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--border);
 }
-#root .stat { background: var(--bg); padding: 14px 16px; }
+#root .stat { padding: 13px 18px; border-right: 1px solid var(--border); }
+#root .stat:last-child { border-right: none; }
 #root .stat .k {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--muted); font-weight: 700; margin-bottom: 3px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--faint); font-weight: 700; margin-bottom: 4px;
 }
-#root .stat .v { font-size: 19px; font-weight: 800; color: var(--text); line-height: 1.2; }
-#root .stat .m { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+#root .stat .v { font-size: 17px; font-weight: 700; color: var(--ink); line-height: 1.2; letter-spacing: -.01em; }
+#root .stat .m { font-size: 11px; color: var(--muted); margin-top: 2px; }
 @media (max-width: 460px) {
   #root .stats { grid-template-columns: 1fr; }
-  #root .stat { padding: 11px 16px; }
-  #root .stat .v { font-size: 17px; }
+  #root .stat { padding: 10px 18px; border-right: none; border-bottom: 1px solid var(--border); }
+  #root .stat:last-child { border-bottom: none; }
+  #root .stat .v { font-size: 16px; }
 }
 #root .section {
-  padding: 14px 18px 4px; font-size: 11px; font-weight: 700;
-  letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+  padding: 13px 18px 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
 }
-#root .rows { padding: 0 8px 6px; }
-#root .row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; }
-#root .row + .row { border-top: 1px solid var(--border); }
+#root .rows {
+  padding: 0 6px 4px;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#root .rows::-webkit-scrollbar { width: 7px; }
+#root .rows::-webkit-scrollbar-track { background: transparent; }
+#root .rows::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+#root .rows::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+#root .row { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 10px; }
+#root .row + .row { border-top: 1px solid var(--line); }
 #root .row .icon {
-  width: 36px; height: 36px; border-radius: 10px; background: var(--surface);
+  width: 32px; height: 32px; border-radius: 9px; background: var(--surface);
+  border: 1px solid var(--border);
   display: flex; align-items: center; justify-content: center;
-  font-size: 17px; flex-shrink: 0;
+  font-size: 15px; flex-shrink: 0;
 }
 #root .row .info { flex: 1; min-width: 0; }
 #root .row .merchant {
-  font-weight: 650; font-size: 13.5px;
+  font-weight: 600; font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#root .row .meta { font-size: 11.5px; color: var(--muted); }
-#root .row .amt { font-weight: 750; font-size: 14px; white-space: nowrap; }
-#root .bars { padding: 4px 18px 10px; display: grid; gap: 9px; }
+#root .row .meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+#root .row .amt { font-weight: 650; font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#root .row .amt.credit { color: var(--credit); }
+#root .row .amt.debit { color: var(--debit); }
+#root .theme-dark .row .amt.debit, #root.theme-dark .row .amt.debit { color: var(--ink); }
+#root .more-note { padding: 8px 18px 2px; font-size: 11px; color: var(--muted); }
+#root .bars {
+  padding: 4px 18px 12px;
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#root .bars::-webkit-scrollbar { width: 7px; }
+#root .bars::-webkit-scrollbar-track { background: transparent; }
+#root .bars::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 #root .bar { display: flex; align-items: center; gap: 10px; }
 #root .bar .name {
-  width: 108px; flex-shrink: 0; font-size: 11.5px; color: var(--muted);
+  width: 116px; flex-shrink: 0; font-size: 11px; color: var(--muted);
   font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#root .bar .track { flex: 1; height: 7px; border-radius: 99px; background: var(--surface); overflow: hidden; }
-#root .bar .fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--green)); }
-#root .bar .amt { width: 62px; text-align: right; font-size: 11.5px; font-weight: 700; }
-@media (max-width: 460px) { #root .bar .name { width: 82px; } }
+#root .bar .track { flex: 1; height: 6px; border-radius: 99px; background: var(--surface); overflow: hidden; }
+#root .bar .fill { height: 100%; border-radius: 99px; background: var(--brand); }
+#root .bar .amt { width: 66px; text-align: right; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+@media (max-width: 460px) { #root .bar .name { width: 88px; } }
 #root .foot { padding: 12px 18px 16px; }
 #root .btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; padding: 12px 18px; background: var(--green); color: #fff;
-  border: none; border-radius: 999px; font-size: 14px; font-weight: 700;
+  width: 100%; padding: 11px 18px; background: var(--brand); color: #fff;
+  border: none; border-radius: 10px; font-size: 13.5px; font-weight: 650;
   font-family: inherit; cursor: pointer; text-decoration: none;
   transition: filter .15s ease, transform .1s ease;
 }
 #root .btn:hover { filter: brightness(1.08); }
 #root .btn:active { transform: translateY(1px); }
-#root .note { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 9px; }
+#root .note { text-align: center; font-size: 10.5px; color: var(--faint); margin-top: 9px; }
 #root .empty { padding: 26px; text-align: center; color: var(--muted); font-size: 13px; }
 `;
 
@@ -126,11 +170,18 @@ document.head.appendChild(styleEl);
 const openai = typeof window !== "undefined" ? window.openai : undefined;
 
 function gbp(n) {
+  const v = Number(n) || 0;
+  const sign = v < 0 ? "-" : "";
   try {
-    return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(n);
+    return sign + new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(Math.abs(v));
   } catch (e) {
-    return "£" + Number(n).toFixed(2);
+    return sign + "£" + Math.abs(v).toFixed(2);
   }
+}
+
+function signedAmt(n) {
+  const v = Number(n) || 0;
+  return (v > 0 ? "+" : "") + gbp(v);
 }
 
 function shortDate(iso) {
@@ -177,43 +228,58 @@ function render(data) {
   const latest = data.latest_transaction || txns[0];
   const cats = data.spending_by_category && typeof data.spending_by_category === "object"
     ? data.spending_by_category : {};
-  const catEntries = Object.keys(cats).map((k) => [k, cats[k]]).sort((a, b) => b[1] - a[1]);
+  const catEntries = Object.entries(cats).sort((a, b) => b[1] - a[1]);
   const maxCat = catEntries.length ? catEntries[0][1] : 1;
 
-  const rowsHtml = txns.map((t) => `
+  const rowsHtml = txns.map((t) => {
+    const isCredit = t.type === "Credit" || Number(t.amount) > 0;
+    return `
     <div class="row">
       <div class="icon">${esc(t.icon || "💳")}</div>
       <div class="info">
         <div class="merchant">${esc(t.merchant)}</div>
         <div class="meta">${esc(t.category)} · ${esc(shortDate(t.date))}</div>
       </div>
-      <div class="amt">${esc(gbp(t.amount))}</div>
-    </div>`).join("");
+      <div class="amt ${isCredit ? "credit" : "debit"}">${esc(signedAmt(t.amount))}</div>
+    </div>`;
+  }).join("");
 
-  const barsHtml = catEntries.map((e) => {
-    const pct = maxCat > 0 ? (e[1] / maxCat) * 100 : 0;
+  const barsHtml = catEntries.map(([name, amt]) => {
+    const pct = maxCat > 0 ? (amt / maxCat) * 100 : 0;
     return `
       <div class="bar">
-        <div class="name">${esc(e[0])}</div>
+        <div class="name">${esc(name)}</div>
         <div class="track"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>
-        <div class="amt">${esc(gbp(e[1]))}</div>
+        <div class="amt">${esc(gbp(amt))}</div>
       </div>`;
   }).join("");
+
+  const shown = data.shown_count ?? txns.length;
+  const total = data.total_count ?? txns.length;
+  const moreNote = total > shown
+    ? `<div class="more-note">Showing ${esc(shown)} of ${esc(total)} — ask a follow-up question (e.g. a date range or category) to narrow it down.</div>`
+    : "";
+  const scopeChip = data.filter_note
+    ? `<div class="scope" title="${esc(data.filter_note)}">${esc(data.filter_note)}</div>`
+    : "";
 
   root.innerHTML = `
     <div class="card">
       <div class="head">
-        <div class="mark">L</div>
-        <div>
-          <div class="title">Vivek's Transactions</div>
-          <div class="sub">Lloyds · Current Account</div>
+        <div class="id">
+          <div class="mark">L</div>
+          <div>
+            <div class="title">Transactions</div>
+            <div class="sub">Lloyds · Current Account</div>
+          </div>
         </div>
+        ${scopeChip}
       </div>
       <div class="stats">
         <div class="stat">
           <div class="k">Total Spending</div>
           <div class="v">${esc(gbp(data.total_spending))}</div>
-          <div class="m">${esc(data.transaction_count)} transactions</div>
+          <div class="m">${esc(total)} transaction${total === 1 ? "" : "s"}</div>
         </div>
         <div class="stat">
           <div class="k">Average</div>
@@ -222,12 +288,13 @@ function render(data) {
         </div>
         <div class="stat">
           <div class="k">Latest</div>
-          <div class="v">${esc(gbp(latest.amount))}</div>
+          <div class="v">${esc(signedAmt(latest.amount))}</div>
           <div class="m">${esc(latest.icon || "")} ${esc(latest.merchant)}</div>
         </div>
       </div>
       <div class="section">Recent activity</div>
       <div class="rows">${rowsHtml}</div>
+      ${moreNote}
       ${barsHtml ? `<div class="section">Spending by category</div><div class="bars">${barsHtml}</div>` : ""}
       <div class="foot">
         <button class="btn" type="button" id="lloyds-cta">Open in Lloyds Web App →</button>
@@ -250,12 +317,33 @@ function render(data) {
   }
 }
 
+// This widget mounts eagerly the moment ChatGPT sees `list_transactions`
+// declares an output template — before it knows what the call will actually
+// return. Two cases produce no widget payload at all: identity not yet
+// verified (a text-only prompt), and a plain-text aggregation answer
+// (sum/count/avg/min/max/balance/breakdown — by design, no card). Neither
+// should show a card: showing a fixed "verify your identity" message would
+// be actively wrong for the second case (already verified, just not a
+// listing). So: track whether an update actually arrived, and once one has,
+// an invalid/missing payload collapses the widget to nothing rather than
+// leaving the optimistic "Loading…" text up or guessing why there's no data
+// — the model's own text reply already carries the actual answer.
 let lastData = null;
+let receivedUpdate = false;
+
+function renderNoCard() {
+  applyTheme();
+  root.innerHTML = "";
+}
+
 function update(raw) {
+  receivedUpdate = true;
   const d = normalise(raw);
   if (d) {
     lastData = d;
     render(d);
+  } else {
+    renderNoCard();
   }
 }
 
@@ -278,13 +366,21 @@ try {
 } catch (e) { /* not embedded */ }
 
 // --- Path 2: window.openai compat surface -----------------------------------
-if (openai && openai.toolOutput) update(openai.toolOutput);
+if (openai && "toolOutput" in openai) update(openai.toolOutput);
 window.addEventListener("openai:set_globals", () => {
-  if (window.openai && window.openai.toolOutput) update(window.openai.toolOutput);
+  if (window.openai && "toolOutput" in window.openai) update(window.openai.toolOutput);
   else applyTheme();
 });
 
-if (!lastData) {
+if (!lastData && !receivedUpdate) {
+  applyTheme();
   root.innerHTML = '<div class="card"><div class="empty">Loading your transactions…</div></div>';
 }
+
+// Fallback: if nothing arrives within a few seconds (host never sent a
+// result, e.g. this mounted from a text-only response and no update event
+// fires at all), stop showing "Loading…" indefinitely.
+setTimeout(() => {
+  if (!lastData && !receivedUpdate) renderNoCard();
+}, 4000);
 </script>

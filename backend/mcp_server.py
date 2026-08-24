@@ -31,8 +31,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import AnyUrl
 
-from backend import auth, bank_client, config, store
-from backend.mock_data import get_transaction_summary
+from backend import auth, bank_client, config, request_log, store, transactions_data
 from backend.ui_cards import (
     MORTGAGE_FIELD_QUESTIONS,
     render_declined_card,
@@ -182,20 +181,44 @@ async def list_tools() -> list[types.Tool]:
             name="list_transactions",
             title="List transactions",
             description=(
-                "Retrieve the user's recent bank transactions with a spending "
-                "summary. Call this whenever the user asks to see, list, view "
-                "or review their transactions, spending, or transaction "
-                "history. Requires identity verification — if the result asks "
-                "the user to verify their identity, follow up with "
-                "`submit_verification_email` then `verify_reference_id` "
-                "(same shared verification flow the mortgage journey uses; if "
-                "the user already verified earlier in this chat you won't be "
-                "asked again), then call `list_transactions` again. Once "
-                "verified, the result renders as an interactive banking "
-                "card — do not repeat the transaction data as a table in your "
-                "reply; just add a one-line summary."
+                "Answer ANY question about the user's bank transactions — "
+                "listing, filtering, totals, averages, counts, min/max, "
+                "balances, or breakdowns/top-N by category, merchant, "
+                "subcategory or month. There is no separate tool per query "
+                "type: pass the user's question (verbatim, lightly cleaned "
+                "up) as `query` and this tool parses it itself, e.g. "
+                "'show my shopping transactions', 'how much did I spend on "
+                "groceries in August', 'what's my average transaction', "
+                "'top 5 merchants', 'spending by category', 'cheapest "
+                "transaction', 'transactions over £100'. Omit `query` (or "
+                "call with no arguments) to show the most recent "
+                "transactions. Requires identity verification — if the "
+                "result asks the user to verify their identity, follow up "
+                "with `submit_verification_email` then `verify_reference_id` "
+                "(same shared verification flow the mortgage journey uses; "
+                "if the user already verified earlier in this chat you "
+                "won't be asked again), then call `list_transactions` again "
+                "with the SAME `query`. Plain listing queries render as an "
+                "interactive banking card — do not repeat the transaction "
+                "data as a table in your reply, just add a one-line summary. "
+                "Aggregation queries (totals, counts, averages, breakdowns, "
+                "min/max, balance) return plain text with no card — relay "
+                "that text as the answer."
             ),
-            inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "The user's transaction question, in their own words "
+                            "(e.g. 'how much did I spend on Amazon last month'). "
+                            "Omit to list the most recent transactions."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
             **{"_meta": TRANSACTIONS_WIDGET_META},
         ),
         types.Tool(
@@ -260,7 +283,10 @@ async def list_tools() -> list[types.Tool]:
                 "verify their identity (either at the end of the mortgage details flow, "
                 "or when `list_transactions` asks for it) and replies with "
                 "their email. Pass `application_id` only when this is part of "
-                "the mortgage flow (omit it for the transactions flow). Sends "
+                "the mortgage flow (omit it for the transactions flow); if it "
+                "was `list_transactions` that asked for verification, pass "
+                "the SAME `query` you gave it, so the answer the user "
+                "originally asked for is what's shown once they verify. Sends "
                 "a reference ID to that email and asks the user to enter it — "
                 "then call `verify_reference_id`. If the email format is "
                 "invalid, no reference ID is sent; ask the user for a valid email again "
@@ -277,6 +303,13 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": "Pass this only when verifying to finish a mortgage application.",
                     },
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Pass this only when verifying to finish a transactions "
+                            "request — the same `query` you gave `list_transactions`."
+                        ),
+                    },
                 },
                 "required": ["email"],
                 "additionalProperties": False,
@@ -287,9 +320,15 @@ async def list_tools() -> list[types.Tool]:
             title="Verify reference ID",
             description=(
                 "Verify the reference ID the user received by email, "
-                "following `submit_verification_email`. If the code matches, "
-                "the result completes whichever flow triggered verification: a "
-                "mortgage application success card, or the transactions card. "
+                "following `submit_verification_email`. If the code matches: "
+                "for the MORTGAGE flow, the result directly completes it — a "
+                "mortgage application success card. For the TRANSACTIONS flow, "
+                "the result only confirms verification in plain text — it does "
+                "NOT show the transactions card. You MUST immediately follow up "
+                "with one more call to `list_transactions` (same `query` as "
+                "before, if there was one) to actually display the result; "
+                "ChatGPT only renders the transactions card from a "
+                "`list_transactions` call, never from `verify_reference_id`. "
                 "If the code is wrong or expired, the request is CANCELLED — "
                 "the result says 'Invalid reference ID' and the pending mortgage "
                 "application is discarded. Do not retry the code in that case; "
@@ -298,13 +337,14 @@ async def list_tools() -> list[types.Tool]:
                 "MUST actually call this tool with the code the user typed — "
                 "never assume it's correct and skip straight to a success "
                 "message. "
-                "OUTPUT THE RETURNED MARKDOWN VERBATIM AND IN FULL — do not "
-                "summarise, shorten or reword it. It is a formatted banking "
-                "card. Replying with something like 'Your application has been "
-                "submitted' instead of the card drops the approved amount, "
-                "interest rate, term, monthly payment and Application ID, all "
-                "of which the customer needs. Likewise, when a code is "
-                "rejected, show the card so the customer sees the reference ID was wrong."
+                "For the mortgage success/cancellation card: OUTPUT THE RETURNED "
+                "MARKDOWN VERBATIM AND IN FULL — do not summarise, shorten or "
+                "reword it. It is a formatted banking card. Replying with "
+                "something like 'Your application has been submitted' instead "
+                "of the card drops the approved amount, interest rate, term, "
+                "monthly payment and Application ID, all of which the customer "
+                "needs. Likewise, when a code is rejected, show the card so the "
+                "customer sees the reference ID was wrong."
             ),
             inputSchema={
                 "type": "object",
@@ -327,11 +367,11 @@ async def _handle_call_tool(req: types.CallToolRequest) -> types.ServerResult:
     """
     name = req.params.name
     arguments = req.params.arguments or {}
-    logger.info("MCP tool call: %s(%s)", name, arguments)
+    request_log.log_request(name, arguments)
 
     try:
         if name == "list_transactions":
-            result = _handle_list_transactions()
+            result = _handle_list_transactions(arguments)
         elif name == "start_mortgage_application":
             result = _handle_start_mortgage_application()
         elif name == "provide_mortgage_details":
@@ -349,6 +389,7 @@ async def _handle_call_tool(req: types.CallToolRequest) -> types.ServerResult:
             isError=True,
         )
 
+    request_log.log_response(name, result)
     return types.ServerResult(result)
 
 
@@ -363,38 +404,33 @@ def _text_result(text: str, structured: dict[str, Any] | None = None) -> types.C
     )
 
 
-def _list_transactions() -> tuple[list[types.ContentBlock], dict[str, Any]]:
-    summary = get_transaction_summary()
-    web_app_url = f"{config.FRONTEND_BASE_URL}/transactions"
+def _run_transaction_query(query: str) -> types.CallToolResult:
+    """Answer a transaction question with no LLM call — see
+    backend/transactions_data.py. A plain listing renders as the widget
+    card; every aggregation (sum/count/avg/min/max/balance/breakdown/top_n)
+    is plain text with no card."""
+    outcome = transactions_data.run_query(query)
 
-    structured: dict[str, Any] = {**summary, "lloyds_web_app_url": web_app_url}
+    if outcome["mode"] == "widget":
+        structured = {
+            **outcome["structured"],
+            "lloyds_web_app_url": f"{config.FRONTEND_BASE_URL}/transactions",
+        }
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=outcome["text"])],
+            structuredContent=structured,
+            isError=False,
+            **{"_meta": TRANSACTIONS_WIDGET_META},
+        )
 
-    # Keep the model-facing text short: the widget is what the user actually
-    # sees, so restating every transaction would duplicate the UI.
-    latest = summary["latest_transaction"]
-    text = (
-        f"Showing {summary['transaction_count']} recent transactions "
-        f"totalling £{summary['total_spending']:,.2f}. "
-        f"Most recent: {latest['merchant']} £{latest['amount']:,.2f}."
-    )
-
-    return [types.TextContent(type="text", text=text)], structured
-
-
-def _transactions_widget_result() -> types.CallToolResult:
-    content, structured = _list_transactions()
-    return types.CallToolResult(
-        content=content,
-        structuredContent=structured,
-        isError=False,
-        **{"_meta": TRANSACTIONS_WIDGET_META},
-    )
+    return _text_result(outcome["text"])
 
 
-def _handle_list_transactions() -> types.CallToolResult:
+def _handle_list_transactions(arguments: dict[str, Any]) -> types.CallToolResult:
+    query = (arguments.get("query") or "").strip()
     if not auth.is_verified():
         return _text_result(render_email_prompt())
-    return _transactions_widget_result()
+    return _run_transaction_query(query)
 
 
 def _handle_start_mortgage_application() -> types.CallToolResult:
@@ -729,6 +765,7 @@ def _finalize_mortgage_application(application_id: str) -> types.CallToolResult:
 def _handle_submit_verification_email(arguments: dict[str, Any]) -> types.CallToolResult:
     email = arguments.get("email", "")
     application_id = arguments.get("application_id")
+    query = arguments.get("query")
     purpose = "mortgage" if application_id else "transactions"
 
     if not auth.is_valid_email(email):
@@ -762,7 +799,7 @@ def _handle_submit_verification_email(arguments: dict[str, Any]) -> types.CallTo
         )
 
     try:
-        auth.start_verification(email, purpose, application_id)
+        auth.start_verification(email, purpose, application_id, query=query)
     except ValueError as exc:
         return _text_result(render_email_prompt(error=str(exc)))
     except RuntimeError as exc:
@@ -790,11 +827,26 @@ def _handle_verify_reference_id(arguments: dict[str, Any]) -> types.CallToolResu
         logger.info("Reference ID rejected — cancelled %s request", purpose or "pending")
         return _text_result(render_reference_id_cancelled())
 
-    purpose, application_id = auth.pop_pending()
+    purpose, application_id, query = auth.pop_pending()
     if purpose == "mortgage" and application_id:
         return _finalize_mortgage_application(application_id)
     if purpose == "transactions":
-        return _transactions_widget_result()
+        # Deliberately NOT rendering the widget from here: ChatGPT only ever
+        # mounts the inline UI component for a tool that *itself* declares
+        # `openai/outputTemplate` in tools/list (see TRANSACTIONS_WIDGET_META
+        # on the `list_transactions` Tool definition) — `verify_reference_id`
+        # declares no such template, so attaching widget `_meta` to *its*
+        # result renders nothing (the earlier `list_transactions` call's own
+        # optimistic widget placeholder is left stuck on "Loading…" instead).
+        # The fix is to hand back to the model with an explicit instruction
+        # to re-call `list_transactions`, the only tool ChatGPT will actually
+        # render a fresh card for.
+        text = "✅ You're verified."
+        return _text_result(
+            f"{text} Call `list_transactions` now"
+            + (f" with query=\"{query}\"" if query else "")
+            + " to show the result."
+        )
 
     return _text_result("✅ You're verified.")
 

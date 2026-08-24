@@ -59,7 +59,12 @@ def verified_email() -> str | None:
     return _session.get("email")
 
 
-def start_verification(email: str, purpose: Purpose, application_id: str | None = None) -> None:
+def start_verification(
+    email: str,
+    purpose: Purpose,
+    application_id: str | None = None,
+    query: str | None = None,
+) -> None:
     global _session
 
     if not is_valid_email(email):
@@ -74,6 +79,10 @@ def start_verification(email: str, purpose: Purpose, application_id: str | None 
         "verified_at": None,
         "pending_purpose": purpose,
         "pending_application_id": application_id,
+        # The transaction question that triggered verification (if any), so
+        # the widget/answer rendered right after verifying matches what the
+        # user actually asked instead of falling back to a generic listing.
+        "pending_query": query,
     }
 
     email_client.send_reference_id_email(email.strip(), reference_id)
@@ -116,16 +125,20 @@ def cancel_pending() -> tuple[Purpose | None, str | None]:
     return purpose, application_id
 
 
-def pop_pending() -> tuple[Purpose | None, str | None]:
-    """Consume and return the (purpose, application_id) that triggered the
-    most recent successful verification."""
+def pop_pending() -> tuple[Purpose | None, str | None, str | None]:
+    """Consume and return the (purpose, application_id, query) that triggered
+    the most recent successful verification. `query` is only set for the
+    transactions purpose, and only when the question that triggered
+    verification is known."""
     if not _session:
-        return None, None
+        return None, None, None
     purpose = _session.get("pending_purpose")
     application_id = _session.get("pending_application_id")
+    query = _session.get("pending_query")
     _session["pending_purpose"] = None
     _session["pending_application_id"] = None
-    return purpose, application_id
+    _session["pending_query"] = None
+    return purpose, application_id, query
 
 
 def reset() -> None:

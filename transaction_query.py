@@ -23,6 +23,13 @@ MONTH_NAMES = {
 }
 
 
+_DATE_LIKE = re.compile(
+    r"\d{4}|\d{1,2}[/.-]\d{1,2}|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec|today|yesterday",
+    re.IGNORECASE,
+)
+
 MERCHANT_STOP_WORDS = {
     "merchant", "merchants", "transaction", "transactions", "spending",
     "spent", "total", "breakdown", "category", "categories", "top",
@@ -59,6 +66,19 @@ class TransactionQueryEngine:
         filtered = self._apply_filters(self.df, parsed["filters"])
         result = self._execute(filtered, parsed)
         return result
+
+    def query_with_intent(self, q: str) -> tuple[str, dict[str, Any] | pd.DataFrame, dict]:
+        """Like `query`, but also returns the detected intent and parsed filters.
+
+        Callers that need to decide *how* to present a result (e.g. a rich
+        list-view widget vs. a one-line aggregate answer) need the intent —
+        `query()` alone throws it away.
+        """
+        q_lower = q.lower().strip()
+        parsed = self._parse(q_lower)
+        filtered = self._apply_filters(self.df, parsed["filters"])
+        result = self._execute(filtered, parsed)
+        return parsed["intent"], result, parsed
 
     # ── parser ──────────────────────────────────────────────────
 
@@ -178,8 +198,12 @@ class TransactionQueryEngine:
         return filters
 
     def _match_category(self, q: str) -> str | None:
+        # normalise "&" <-> "and" both ways — several category names use "&"
+        # ("Food & Dining", "Bills & Utilities", ...) but users type "and".
+        q_and = q.replace("&", "and")
         for cat in self._categories:
-            if cat.lower() in q:
+            cat_lower = cat.lower()
+            if cat_lower in q or cat_lower.replace("&", "and") in q_and:
                 return cat
         # fuzzy fallback — skip common query words
         skip = {"show", "list", "all", "how", "much", "many", "what", "total",
@@ -241,9 +265,12 @@ class TransactionQueryEngine:
             end = start + pd.offsets.MonthEnd(0)
             return {"date_from": start, "date_to": end}
 
-        # "between X and Y" or "from X to Y"
+        # "between X and Y" or "from X to Y" — only treat as a date range if
+        # both sides actually look like dates, so amount ranges like
+        # "between 50 and 200" aren't swallowed here (dateutil will happily,
+        # and wrongly, parse a bare "50" as the year 2050).
         m = re.search(r"(?:between|from)\s+(.+?)\s+(?:and|to)\s+(.+?)(?:\s*$)", q)
-        if m:
+        if m and _DATE_LIKE.search(m.group(1)) and _DATE_LIKE.search(m.group(2)):
             try:
                 d1 = dateparser.parse(m.group(1), dayfirst=True)
                 d2 = dateparser.parse(m.group(2), dayfirst=True)

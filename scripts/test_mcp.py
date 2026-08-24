@@ -469,15 +469,76 @@ async def main(base_url: str) -> int:
                                 "average_transaction", "latest_transaction",
                                 "spending_by_category", "lloyds_web_app_url"):
                         c.check(f"structuredContent.{key}", key in sc)
-                    c.check("5 transactions returned",
-                            len(sc.get("transactions", [])) == 5,
-                            str(len(sc.get("transactions", []))))
+                    n = len(sc.get("transactions", []))
+                    c.check("a non-empty, capped page of transactions is returned",
+                            0 < n <= 30, str(n))
                     c.check("web app url points at /transactions",
                             str(sc.get("lloyds_web_app_url", "")).endswith("/transactions"),
                             str(sc.get("lloyds_web_app_url")))
                 text = text_of(result)
                 c.check("model-facing text is a short summary (not a full table)",
                         0 < len(text) < 300, f"{len(text)} chars")
+
+                # --- dynamic queries: aggregations answer as text, no widget ---
+                print("\ntools/call list_transactions (dynamic queries, no LLM)")
+                for query, needle in [
+                    ("how much did I spend on groceries", "£"),
+                    ("how many transactions do I have", "transaction"),
+                    ("what is my average transaction", "average"),
+                    ("what was my cheapest transaction", "smallest"),
+                    ("top 5 merchants", "top results"),
+                ]:
+                    agg = await session.call_tool("list_transactions", {"query": query})
+                    agg_meta = agg.meta or {}
+                    c.check(f"'{query}' has NO widget meta",
+                            not agg_meta.get("openai/outputTemplate"))
+                    c.check(f"'{query}' answers in text",
+                            needle in text_of(agg).lower(), text_of(agg)[:100])
+
+                for query in ("show my shopping transactions", "transactions in august 2025"):
+                    lst = await session.call_tool("list_transactions", {"query": query})
+                    lst_meta = lst.meta or {}
+                    c.check(f"'{query}' renders the widget",
+                            lst_meta.get("openai/outputTemplate") == TRANSACTIONS_WIDGET_URI)
+
+                # --- regression: verify_reference_id must NOT try to render the
+                # widget itself for the transactions flow (ChatGPT only mounts
+                # the card for a tool that declares the output template in
+                # tools/list, i.e. list_transactions — attaching widget _meta to
+                # verify_reference_id's own result renders nothing in the real
+                # ChatGPT UI, even though the raw MCP protocol result looks fine).
+                # It must instead hand back to the model with an instruction to
+                # call list_transactions again.
+                print("\ntools/call verify_reference_id (transactions purpose — must not self-render)")
+                if not await reset_backend_state(base_url):
+                    c.skip("verify_reference_id transactions-purpose check", "could not reset backend state")
+                else:
+                    pending_query = "show my shopping transactions"
+                    unverified = await session.call_tool("list_transactions", {"query": pending_query})
+                    c.check("fresh unverified query asks for email",
+                            "email id to continue" in text_of(unverified).lower())
+                    await session.call_tool(
+                        "submit_verification_email",
+                        {"email": KNOWN_CUSTOMER_EMAIL, "query": pending_query},
+                    )
+                    ref_id = await fetch_debug_reference_id(base_url)
+                    if ref_id is None:
+                        c.skip("verify_reference_id transactions-purpose check", "DEBUG_EXPOSE_REFERENCE_ID not enabled")
+                    else:
+                        verify_result = await session.call_tool("verify_reference_id", {"reference_id": ref_id})
+                        verify_meta = verify_result.meta or {}
+                        c.check("verify_reference_id result has NO widget meta (text-only)",
+                                not verify_meta.get("openai/outputTemplate"), str(verify_meta))
+                        verify_text = text_of(verify_result).lower()
+                        c.check("verify_reference_id tells the model to call list_transactions again",
+                                "list_transactions" in verify_text, text_of(verify_result))
+                        c.check("verify_reference_id echoes the original query back",
+                                pending_query in text_of(verify_result), text_of(verify_result))
+
+                        followup = await session.call_tool("list_transactions", {"query": pending_query})
+                        followup_meta = followup.meta or {}
+                        c.check("the follow-up list_transactions call DOES render the widget",
+                                followup_meta.get("openai/outputTemplate") == TRANSACTIONS_WIDGET_URI)
 
     print(f"\n{'All checks passed.' if not c.failures else f'{c.failures} check(s) FAILED.'}\n")
     return 1 if c.failures else 0

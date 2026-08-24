@@ -353,6 +353,43 @@ a Markdown table. If you see plain text instead, see Troubleshooting below.
 - "I want a mortgage"
 - "Apply for a mortgage loan" → then reply with a salary, e.g. "£50,000"
 
+### Transaction questions you can ask
+
+`list_transactions` answers any transaction question against the real
+customer workbook (`data/customer_001_transactions_1_year_gbp (1).xlsx`,
+603 transactions, Aug 2025 – Jul 2026, 18 categories, 68 merchants) using a
+rule-based parser (`transaction_query.py` +
+`backend/transactions_data.py`) — **no LLM call is made** to answer the
+question; regex/keyword matching + pandas do all the work.
+
+Plain listing questions render the transactions card (widget). Every
+aggregation — totals, counts, averages, min/max, balance, or a
+breakdown/top-N — answers in a short line of text instead, with no card.
+
+| You can ask | Renders as |
+|---|---|
+| "Show my transactions" / "List my transactions" | Card (most recent, capped at 30) |
+| "Show my shopping transactions" | Card, filtered by category |
+| "Transactions with Netflix" / "...at Tesco" | Card, filtered by merchant |
+| "Show me transactions in August 2025" / "...between 1 Aug and 31 Aug 2025" | Card, filtered by date |
+| "Show me transactions over £100" / "...under £50" / "...between £50 and £200" | Card, filtered by amount |
+| "Show my income / credit transactions" | Card, filtered by transaction type |
+| "How much did I spend on groceries?" / "...in August?" | Text: total |
+| "How many transactions do I have?" | Text: count |
+| "What's my average transaction?" | Text: average |
+| "What was my cheapest / most expensive transaction?" | Text: single transaction |
+| "Top 5 merchants" / "Top categories by spend" | Text: ranked list |
+| "Spending by category" / "...by merchant" / "...by month" | Text: breakdown |
+| "What's my balance?" | Text: latest vs. earliest balance in range |
+
+Filters combine freely (category + date + amount, etc.), and any of the
+above can be scoped further with a date range, category, subcategory,
+merchant, or amount range in the same sentence — e.g. "how much did I spend
+at Amazon between January and March" or "top 3 merchants in December".
+
+Every request and response is logged to `logs/mcp_requests.log` (see
+Troubleshooting).
+
 ---
 
 ## 5. Testing without ChatGPT
@@ -478,11 +515,28 @@ tunnel itself failed — that omission was what left orphans holding the domain.
 
 Or just run with `--no-ngrok` if you only need local testing.
 
+**Where to find what a transaction query actually did** — every
+`list_transactions` request/response is logged to `logs/mcp_requests.log`
+(created on first run), one blank-line-framed block per call:
+
+```
+2026-08-19 10:03:11 |
+2026-08-19 10:03:11 | REQUEST  | tool=list_transactions | arguments={"query": "how much did I spend on groceries"}
+2026-08-19 10:03:11 | RESPONSE | tool=list_transactions | {"isError": false, "content": [...], "structuredContent": null}
+2026-08-19 10:03:11 |
+```
+
+The same lines also go to stdout. Tail it live with `tail -f logs/mcp_requests.log`.
+
 ## 7. Notes & limitations (demo scope)
 
-- All banking data is synthetic — `backend/mock_data.py` for transactions,
-  `bank/customers.py` for the three customer records. There is no real ledger,
-  account, or credit bureau behind this.
+- Transactions answered via MCP (`list_transactions`) come from the real
+  workbook `data/customer_001_transactions_1_year_gbp (1).xlsx` (603 rows),
+  parsed dynamically — see "Transaction questions you can ask" above. The
+  legacy REST endpoint (`GET /api/transactions`, used by Actions and the
+  Lloyds web app) and `bank/customers.py` (the three customer records) still
+  use synthetic `backend/mock_data.py` data — there is no real ledger,
+  account, or credit bureau behind either.
 - Underwriting (`bank/underwriting.py`) is a faithful port of the ACP mortgage
   sub-agent's skill classes, rewritten as plain functions. Two defects in the
   original were fixed on the way in, both marked `BUGFIX` in the source:
