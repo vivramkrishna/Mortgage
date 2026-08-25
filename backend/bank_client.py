@@ -75,6 +75,38 @@ def underwrite(
     return response.json()
 
 
+def check_affordability(
+    combined_annual_income: float,
+    deposit_percentage: float | None = None,
+    deposit_amount: float | None = None,
+    term_years: int | None = None,
+) -> dict:
+    """Indicative "what could I borrow" quote. No session/customer identity
+    involved, so unlike `underwrite()` this needs no session_id or email.
+    Pass exactly one of deposit_percentage/deposit_amount — whichever the
+    customer answered with."""
+    try:
+        response = httpx.post(
+            _url("/api/affordability"),
+            json={
+                "combined_annual_income": combined_annual_income,
+                "deposit_percentage": deposit_percentage,
+                "deposit_amount": deposit_amount,
+                "term_years": term_years,
+            },
+            timeout=TIMEOUT,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("Bank affordability check failed: %s", exc)
+        raise BankUnavailable(
+            "The bank service is not responding, so this affordability check "
+            f"could not run. Make sure it is running at {config.BANK_BASE_URL}."
+        ) from exc
+
+    response.raise_for_status()
+    return response.json()
+
+
 def reset_records() -> None:
     """Ask the bank to wipe its session records (debug-gated on the bank side).
 

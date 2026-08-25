@@ -14,6 +14,12 @@ _latest_application_id: str | None = None
 _drafts: dict[str, dict] = {}
 _latest_draft_id: str | None = None
 
+# In-progress affordability enquiries — kept in a separate namespace (and
+# separate `AFFORD-` ID prefix) from mortgage application drafts so the two
+# conversational flows can never be confused with each other.
+_affordability_drafts: dict[str, dict] = {}
+_latest_affordability_draft_id: str | None = None
+
 
 def save_application(offer: dict) -> None:
     global _latest_application_id
@@ -71,11 +77,46 @@ def discard_draft(application_id: str) -> None:
     _drafts.pop(application_id, None)
 
 
+def create_affordability_draft() -> dict:
+    global _latest_affordability_draft_id
+    enquiry_id = f"AFFORD-{uuid.uuid4().hex[:8].upper()}"
+    draft = {"enquiry_id": enquiry_id, "fields": {}}
+    _affordability_drafts[enquiry_id] = draft
+    _latest_affordability_draft_id = enquiry_id
+    return draft
+
+
+def get_affordability_draft(enquiry_id: str) -> dict | None:
+    return _affordability_drafts.get(enquiry_id)
+
+
+def get_latest_affordability_draft() -> dict | None:
+    if _latest_affordability_draft_id is None:
+        return None
+    return _affordability_drafts.get(_latest_affordability_draft_id)
+
+
+def update_affordability_draft(enquiry_id: str, **fields) -> dict | None:
+    draft = _affordability_drafts.get(enquiry_id)
+    if draft is None:
+        return None
+    for key, value in fields.items():
+        if value is not None:
+            draft["fields"][key] = value
+    return draft
+
+
+def discard_affordability_draft(enquiry_id: str) -> None:
+    _affordability_drafts.pop(enquiry_id, None)
+
+
 def reset() -> None:
     """Clear all applications and drafts — local-dev-only, used by
     scripts/test_mcp.py to get a deterministic starting state."""
-    global _latest_application_id, _latest_draft_id
+    global _latest_application_id, _latest_draft_id, _latest_affordability_draft_id
     _applications.clear()
     _drafts.clear()
+    _affordability_drafts.clear()
     _latest_application_id = None
     _latest_draft_id = None
+    _latest_affordability_draft_id = None

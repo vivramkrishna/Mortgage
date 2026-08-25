@@ -34,6 +34,8 @@ from pydantic import AnyUrl
 from backend import auth, bank_client, config, request_log, store, transactions_data
 from backend.ui_cards import (
     MORTGAGE_FIELD_QUESTIONS,
+    render_affordability_card,
+    render_affordability_field_question,
     render_declined_card,
     render_email_prompt,
     render_mortgage_field_question,
@@ -53,6 +55,13 @@ logger = logging.getLogger(__name__)
 # property they are buying now, which the bank has no way to know, and it is
 # what the loan-to-value check is computed against.
 MORTGAGE_FIELDS = ["loan_amount", "property_value", "preferred_term"]
+
+# Affordability enquiry (`check_affordability`) is a distinct, lighter-weight
+# flow from the mortgage application above — no identity verification, no
+# customer record, no binding offer. Needs combined_annual_income plus
+# EITHER deposit_percentage or deposit_amount; kept on its own draft
+# namespace (backend/store.py) so the two conversations can never be
+# confused with each other.
 
 WIDGETS_DIR = Path(__file__).resolve().parent / "widgets"
 
@@ -173,6 +182,27 @@ _MORTGAGE_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
 }
 
+_AFFORDABILITY_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "combined_annual_income": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "Combined annual income of all applicants, in GBP.",
+    },
+    # Customers answer the deposit question either way — pass whichever the
+    # user actually said; never convert one to the other yourself.
+    "deposit_percentage": {
+        "type": "number",
+        "minimum": 0,
+        "exclusiveMaximum": 100,
+        "description": "Deposit saved, as a percentage of the property price (e.g. 15 for 15%). Use this OR deposit_amount, whichever the user gave.",
+    },
+    "deposit_amount": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "Deposit saved, as a cash amount in GBP (e.g. 15000 for '£15,000 saved'). Use this OR deposit_percentage, whichever the user gave.",
+    },
+}
+
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -220,6 +250,48 @@ async def list_tools() -> list[types.Tool]:
                 "additionalProperties": False,
             },
             **{"_meta": TRANSACTIONS_WIDGET_META},
+        ),
+        types.Tool(
+            name="check_affordability",
+            title="Check mortgage affordability",
+            description=(
+                "Give an INDICATIVE 'how much could I borrow / what could I "
+                "afford' estimate. Call this the moment the user asks what "
+                "they could afford, says something like 'we need a bigger "
+                "home we can afford', or asks for a borrowing estimate — "
+                "WITHOUT starting a full mortgage application. No identity "
+                "verification, no customer record lookup, non-binding "
+                "estimate only, never an offer.\n\n"
+                "CRITICAL: every text this tool returns — the next question "
+                "to ask, or the final quote — is your COMPLETE reply. Paste "
+                "it verbatim, character for character: same words, same "
+                "labels, same line order, same numbers. Do not add a "
+                "preamble, example, explanation or closing sentence of your "
+                "own. Do not merge it with another question. Do not rename "
+                "any label (it is 'Mortgage amount', not 'Loan amount'; "
+                "'Tenure', not 'Mortgage term'; etc — copy exactly as given, "
+                "do not substitute a synonym).\n\n"
+                "Needs combined_annual_income and EITHER deposit_percentage "
+                "OR deposit_amount — pass through whichever unit the user "
+                "gave, both in the same call if given together. Never "
+                "convert one into the other yourself. Always pass the same "
+                "`enquiry_id` (returned by the first call) on every "
+                "follow-up call for this enquiry.\n\n"
+                "NEVER answer an affordability question with your own "
+                "estimate, range or general knowledge — always call this "
+                "tool for the numbers."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "enquiry_id": {
+                        "type": "string",
+                        "description": "The enquiry_id from a prior call. Omit on the first call.",
+                    },
+                    **_AFFORDABILITY_FIELD_SCHEMAS,
+                },
+                "additionalProperties": False,
+            },
         ),
         types.Tool(
             name="start_mortgage_application",
@@ -367,11 +439,12 @@ async def _handle_call_tool(req: types.CallToolRequest) -> types.ServerResult:
     """
     name = req.params.name
     arguments = req.params.arguments or {}
-    request_log.log_request(name, arguments)
 
     try:
         if name == "list_transactions":
             result = _handle_list_transactions(arguments)
+        elif name == "check_affordability":
+            result = _handle_check_affordability(arguments)
         elif name == "start_mortgage_application":
             result = _handle_start_mortgage_application()
         elif name == "provide_mortgage_details":
@@ -389,11 +462,32 @@ async def _handle_call_tool(req: types.CallToolRequest) -> types.ServerResult:
             isError=True,
         )
 
-    request_log.log_response(name, result)
     return types.ServerResult(result)
 
 
 server.request_handlers[types.CallToolRequest] = _handle_call_tool
+
+
+def _with_request_logging(handler):
+    """Wrap an MCP request handler so every request/response cycle it
+    dispatches — not just tool calls — is audit-logged (backend/request_log.py),
+    pretty-printed and blank-line-framed. Applied to every entry in
+    `server.request_handlers` below, once all of them are registered."""
+
+    async def wrapped(req: Any) -> types.ServerResult:
+        try:
+            result = await handler(req)
+        except Exception as exc:
+            request_log.log_call(req, None, error=exc)
+            raise
+        request_log.log_call(req, result)
+        return result
+
+    return wrapped
+
+
+for _req_type, _handler in list(server.request_handlers.items()):
+    server.request_handlers[_req_type] = _with_request_logging(_handler)
 
 
 def _text_result(text: str, structured: dict[str, Any] | None = None) -> types.CallToolResult:
@@ -431,6 +525,129 @@ def _handle_list_transactions(arguments: dict[str, Any]) -> types.CallToolResult
     if not auth.is_verified():
         return _text_result(render_email_prompt())
     return _run_transaction_query(query)
+
+
+def _coerce_percentage(value: Any) -> float | None:
+    """Parse a deposit percentage, tolerating '15%' formatting and a bare
+    ratio (e.g. 0.15 meaning 15%) — same forgiving spirit as `_coerce_amount`."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip().rstrip("%")
+        try:
+            value = float(cleaned)
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    if 0 < parsed < 1:
+        parsed *= 100
+    return parsed
+
+
+def _validate_affordability_field(field: str, value: Any) -> tuple[Any, str | None]:
+    if field == "deposit_percentage":
+        parsed = _coerce_percentage(value)
+        if parsed is None:
+            return None, "That doesn't look like a valid percentage — could you try again?"
+        if not (0 <= parsed < 100):
+            return None, "Deposit percentage should be between 0 and 100."
+        return parsed, None
+
+    if field == "deposit_amount":
+        parsed = _coerce_amount(value)
+        if parsed is None:
+            return None, "That doesn't look like a valid amount — could you try again?"
+        if parsed < 0:
+            return None, "Deposit amount can't be negative."
+        return parsed, None
+
+    parsed = _coerce_amount(value)
+    if parsed is None:
+        return None, "That doesn't look like a valid number — could you try again?"
+    if parsed <= 0:
+        return None, "Combined annual income needs to be a positive number."
+    return parsed, None
+
+
+def _handle_check_affordability(arguments: dict[str, Any]) -> types.CallToolResult:
+    enquiry_id = arguments.get("enquiry_id")
+    draft = store.get_affordability_draft(enquiry_id) if enquiry_id else None
+    draft = draft or store.get_latest_affordability_draft()
+    if draft is None:
+        draft = store.create_affordability_draft()
+    enquiry_id = draft["enquiry_id"]
+
+    if "combined_annual_income" not in draft["fields"] and arguments.get("combined_annual_income") is not None:
+        parsed_value, error = _validate_affordability_field(
+            "combined_annual_income", arguments["combined_annual_income"]
+        )
+        if error:
+            return _text_result(
+                render_affordability_field_question("combined_annual_income", error=error),
+                structured={"enquiry_id": enquiry_id},
+            )
+        store.update_affordability_draft(enquiry_id, combined_annual_income=parsed_value)
+
+    # Deposit can arrive as either a percentage or a cash amount — capture
+    # whichever the user gave (never both, and never converted from one to
+    # the other here; the underlying calc handles that).
+    has_deposit = "deposit_percentage" in draft["fields"] or "deposit_amount" in draft["fields"]
+    if not has_deposit:
+        for deposit_field in ("deposit_percentage", "deposit_amount"):
+            if arguments.get(deposit_field) is None:
+                continue
+            parsed_value, error = _validate_affordability_field(deposit_field, arguments[deposit_field])
+            if error:
+                return _text_result(
+                    render_affordability_field_question("deposit", error=error),
+                    structured={"enquiry_id": enquiry_id},
+                )
+            store.update_affordability_draft(enquiry_id, **{deposit_field: parsed_value})
+            break
+
+    missing = []
+    if "combined_annual_income" not in draft["fields"]:
+        missing.append("combined_annual_income")
+    if "deposit_percentage" not in draft["fields"] and "deposit_amount" not in draft["fields"]:
+        missing.append("deposit")
+    if missing:
+        return _text_result(
+            render_affordability_field_question(missing[0]),
+            structured={"enquiry_id": enquiry_id},
+        )
+
+    fields = draft["fields"]
+    try:
+        result = bank_client.check_affordability(
+            combined_annual_income=float(fields["combined_annual_income"]),
+            deposit_percentage=float(fields["deposit_percentage"]) if "deposit_percentage" in fields else None,
+            deposit_amount=float(fields["deposit_amount"]) if "deposit_amount" in fields else None,
+        )
+    except bank_client.BankUnavailable as exc:
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=str(exc))],
+            isError=True,
+        )
+
+    store.discard_affordability_draft(enquiry_id)
+
+    # fields shown on the card — the enquiry is finished (its draft is
+    # discarded above); total_interest/total_amount_repaid/is_indicative
+    # are derivable but not part of what we show.
+    return _text_result(
+        render_affordability_card(result),
+        structured={
+            "property_price": result["property_price"],
+            "deposit_amount": result["deposit_amount"],
+            "deposit_percentage": result["deposit_percentage"],
+            "loan_amount": result["loan_amount"],
+            "interest_rate": result["interest_rate"],
+            "term_years": result["term_years"],
+            "monthly_payment": result["monthly_payment"],
+        },
+    )
 
 
 def _handle_start_mortgage_application() -> types.CallToolResult:

@@ -198,6 +198,40 @@ will be in touch to guide you through the next steps and answer any questions.
 """
 
 
+# --- Affordability enquiry: indicative-only, no verification required ------
+
+AFFORDABILITY_FIELD_QUESTIONS = {
+    "combined_annual_income": "What's your combined annual income?",
+    "deposit": "Do you have a deposit saved? Let me know either the percentage (e.g. \"15%\") or the amount (e.g. \"£15,000\").",
+}
+
+
+def render_affordability_field_question(field: str, error: str | None = None) -> str:
+    question = AFFORDABILITY_FIELD_QUESTIONS.get(
+        field, f"Could you share your {field.replace('_', ' ')}?"
+    )
+    prefix = f"⚠️ {error}\n\n" if error else ""
+    return f"""### 🏡 Affordability Check
+
+{prefix}**{question}**
+"""
+
+
+def render_affordability_card(result: dict) -> str:
+    """Compact indicative quote — never presented as an offer."""
+    return f"""✅ Thank you. I've put together your affordability estimate based on what we've discussed — take a look
+
+Property Estimate: £{result['property_price']:,.2f}
+Deposit: £{result['deposit_amount']:,.2f} ({result['deposit_percentage']:.1f}%)
+Mortgage amount: £{result['loan_amount']:,.2f}
+interest Rate: {result['interest_rate']}%
+Tenure: {result['term_years']} years
+Monthly Payments: £{result['monthly_payment']:,.2f}
+
+
+"""
+
+
 def render_mortgage_offer_card(offer: dict, web_app_url: str) -> str:
     next_steps = "\n".join(f"{i}. {step}" for i, step in enumerate(offer["next_steps"], start=1))
 

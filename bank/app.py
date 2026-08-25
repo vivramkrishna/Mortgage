@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from bank import records, underwriting
+from bank import affordability, records, underwriting
 from bank.customers import get_customer, list_customers
 
 # Same as backend/config.py: honour .env however this service is launched.
@@ -62,6 +62,16 @@ class UnderwriteRequest(BaseModel):
 class ChatEvent(BaseModel):
     sender: str
     text: str
+
+
+class AffordabilityRequest(BaseModel):
+    combined_annual_income: float = Field(gt=0)
+    # Exactly one of these two — a percentage (e.g. 15 for 15%, not a ratio)
+    # or a cash deposit — is required; affordability.calculate_affordability
+    # enforces that and derives the other.
+    deposit_percentage: float | None = Field(default=None, ge=0, lt=100)
+    deposit_amount: float | None = Field(default=None, ge=0)
+    term_years: int | None = Field(default=None, ge=1, le=50)
 
 
 @app.get("/health", tags=["meta"])
@@ -138,6 +148,23 @@ async def underwrite(payload: UnderwriteRequest) -> dict:
         "application": application,
         **result,
     }
+
+
+@app.post("/api/affordability", tags=["underwriting"])
+async def affordability_enquiry(payload: AffordabilityRequest) -> dict:
+    """Indicative "what could I borrow" estimate — no customer record, no
+    identity check, not a binding offer. Kept off the underwriting/session
+    machinery entirely since nothing here is tied to an application yet."""
+    try:
+        result = affordability.calculate_affordability(
+            combined_annual_income=payload.combined_annual_income,
+            deposit_percentage=payload.deposit_percentage,
+            deposit_amount=payload.deposit_amount,
+            term_years=payload.term_years,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return result
 
 
 @app.post("/api/session/{session_id}/chat", tags=["sessions"])
